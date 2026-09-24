@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cloud Nexus AI</title>
+    <link rel="stylesheet" href="/static/drive.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo" aria-hidden="true"></span>
+        <div>
+          <strong>Cloud Nexus AI</strong>
+          <span class="subtitle">Study Drive</span>
+        </div>
+      </div>
+      <label class="search">
+        <span class="sr-only">Search</span>
+        <input id="search" type="search" placeholder="Search in Drive" />
+      </label>
+      <div class="top-actions">
+        <button id="view-toggle" class="ghost" type="button">List</button>
+      </div>
+    </header>
+
+    <div class="shell">
+      <aside class="sidebar">
+        <button id="new-folder" class="primary" type="button">+ New folder</button>
+        <nav>
+          <button class="nav-item active" data-root type="button">My Drive</button>
+        </nav>
+        <ul id="folder-tree" class="tree"></ul>
+        <p class="hint">PDF, PPT, and notes stay in folders. AI answers from this Drive later.</p>
+      </aside>
+
+      <main class="main">
+        <div class="toolbar">
+          <nav id="breadcrumbs" class="crumbs"></nav>
+          <div class="toolbar-right">
+            <label class="upload-btn">
+              Upload
+              <input id="file-input" type="file" multiple accept=".pdf,.ppt,.pptx,.doc,.docx,.txt,.md,application/pdf" />
+            </label>
+          </div>
+        </div>
+        <div id="dropzone" class="grid" tabindex="0">
+          <p id="empty" class="empty hidden">This folder is empty. Upload a PDF, PPT, or notes.</p>
+        </div>
+        <div id="preview-wrap" class="preview hidden">
+          <div class="preview-bar">
+            <span id="preview-name"></span>
+            <button id="preview-close" type="button" class="ghost">Close</button>
+          </div>
+          <iframe id="preview-frame" title="File preview"></iframe>
+        </div>
+      </main>
+
+      <aside class="ai-panel">
+        <header>
+          <h2>Nexus AI</h2>
+          <p id="ai-scope">Scope: My Drive</p>
+        </header>
+        <div id="chat" class="chat"></div>
+        <div class="ai-modes">
+          <button type="button" data-mode="explain" class="chip active">Explain concept</button>
+          <button type="button" data-mode="short_notes" class="chip">Short notes</button>
+        </div>
+        <form id="chat-form">
+          <textarea id="chat-input" rows="3" placeholder="Ask about the files in this folder…"></textarea>
+          <button type="submit" class="primary">Ask</button>
+        </form>
+      </aside>
+    </div>
+    <script src="/static/drive.js"></script>
+  </body>
+</html>
