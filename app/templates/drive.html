@@ -42,6 +42,14 @@
               Upload
               <input id="file-input" type="file" multiple accept=".pdf,.ppt,.pptx,.doc,.docx,.txt,.md,application/pdf" />
             </label>
+            <button
+    id="deleteBtn"
+    class="danger-btn"
+    type="button"
+    disabled
+>
+    🗑 Delete
+</button>
           </div>
         </div>
         <div id="dropzone" class="grid" tabindex="0">
@@ -72,6 +80,87 @@
         </form>
       </aside>
     </div>
-    <script src="/static/drive.js"></script>
+    <!-- =====================================================
+     AI ACTION MENU
+     ===================================================== -->
+
+<div id="aiActionMenu" class="ai-action-menu hidden">
+  <div class="ai-action-title">
+    <span>✨ AI Actions</span>
+  </div>
+
+  <div id="aiActionList"></div>
+
+  <button
+    type="button"
+    id="customizeActionsBtn"
+    class="ai-action-settings"
+  >
+    ⚙ Customize actions
+  </button>
+</div>
+
+
+<!-- =====================================================
+     AI ACTION SETTINGS
+     ===================================================== -->
+
+<div id="actionSettingsOverlay" class="action-settings-overlay hidden">
+
+  <div class="action-settings-modal">
+
+    <div class="action-settings-header">
+      <div>
+        <h2>Customize AI Actions</h2>
+        <p>These actions are available across your chats.</p>
+      </div>
+
+      <button
+        type="button"
+        id="closeActionSettings"
+        class="action-close"
+      >
+        ×
+      </button>
+    </div>
+
+
+    <div id="editableActionList" class="editable-action-list"></div>
+
+
+    <button
+      type="button"
+      id="addCustomAction"
+      class="add-action-btn"
+    >
+      + Add custom action
+    </button>
+
+
+    <div class="action-settings-footer">
+
+      <button
+        type="button"
+        id="resetActions"
+        class="ghost"
+      >
+        Reset defaults
+      </button>
+
+      <button
+        type="button"
+        id="saveActions"
+        class="primary"
+      >
+        Save
+      </button>
+
+    </div>
+
+  </div>
+
+</div>
+    <script src="/static/drive.js?v=3"></script>
+
   </body>
 </html>

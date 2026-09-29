@@ -54,6 +54,8 @@ def presign_get(
         Params={
             "Bucket": S3_BUCKET_NAME,
             "Key": key,
+            "ResponseContentDisposition": "inline",
+            "ResponseContentType": "application/pdf",
         },
         ExpiresIn=expires_seconds,
     )
@@ -92,5 +94,4 @@ def download_object(key: str, destination: str) -> str:
         key,
         destination,
     )
-
     return destination

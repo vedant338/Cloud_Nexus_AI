@@ -1,0 +1,23 @@
+eventBus.on(
+    "pagesinit",
+    () => {
+        console.log("PDF.js pages initialized");
+
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                try {
+                    pdfViewer.currentScaleValue = "page-width";
+                    console.log("PDF scale applied");
+                } catch (error) {
+                    console.error(
+                        "PDF scale failed:",
+                        error
+                    );
+                }
+            });
+        });
+    },
+    {
+        once: true
+    }
+);
