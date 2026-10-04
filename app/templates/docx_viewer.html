@@ -21,8 +21,11 @@
         html,
         body {
             margin: 0;
+            padding: 0;
+
             width: 100%;
             height: 100%;
+
             overflow: hidden;
 
             font-family:
@@ -32,8 +35,8 @@
                 "Segoe UI",
                 sans-serif;
 
-            background: #f5f7fb;
-            color: #1f2937;
+            background: #eef1f5;
+            color: #202124;
         }
 
 
@@ -43,37 +46,34 @@
 
         .topbar {
 
-            height: 64px;
-            width: 100%;
+            height: 58px;
 
             display: flex;
             align-items: center;
 
-            padding: 0 22px;
+            padding: 0 18px;
 
-            background: rgba(255, 255, 255, 0.97);
+            background: #ffffff;
 
             border-bottom: 1px solid #e5e7eb;
 
             box-shadow:
-                0 1px 3px rgba(0, 0, 0, 0.05);
+                0 1px 4px rgba(0, 0, 0, 0.08);
 
             position: relative;
-            z-index: 10;
+            z-index: 20;
         }
 
-
-        /* =========================================
-           BACK BUTTON
-        ========================================= */
 
         .back {
 
             display: flex;
             align-items: center;
-            gap: 8px;
 
-            border: none;
+            gap: 7px;
+
+            border: 0;
+
             background: transparent;
 
             color: #374151;
@@ -81,41 +81,42 @@
             font-size: 14px;
             font-weight: 500;
 
-            padding: 9px 12px;
+            padding: 8px 10px;
 
             border-radius: 8px;
 
             cursor: pointer;
-
-            transition:
-                background 0.15s ease,
-                color 0.15s ease;
         }
+
 
         .back:hover {
 
             background: #f3f4f6;
-            color: #111827;
         }
+
 
         .back-icon {
 
-            font-size: 22px;
+            font-size: 21px;
+
             line-height: 1;
         }
 
 
         /* =========================================
-           FILE INFORMATION
+           FILE INFO
         ========================================= */
 
         .file-info {
 
             display: flex;
             align-items: center;
-            gap: 12px;
 
-            margin-left: 14px;
+            gap: 10px;
+
+            margin-left: 12px;
+
+            min-width: 0;
         }
 
 
@@ -124,11 +125,13 @@
             width: 34px;
             height: 34px;
 
-            border-radius: 8px;
+            flex: 0 0 34px;
 
             display: flex;
             align-items: center;
             justify-content: center;
+
+            border-radius: 8px;
 
             background:
                 linear-gradient(
@@ -137,333 +140,234 @@
                     #1d4ed8
                 );
 
-            color: white;
+            color: #ffffff;
 
             font-size: 15px;
             font-weight: 700;
+        }
 
-            box-shadow:
-                0 2px 5px rgba(37, 99, 235, 0.25);
+
+        .file-details {
+
+            min-width: 0;
         }
 
 
         .file-name {
 
-            font-size: 15px;
+            font-size: 14px;
+
             font-weight: 600;
 
             color: #111827;
 
-            max-width: 550px;
+            max-width: 500px;
 
             overflow: hidden;
+
             text-overflow: ellipsis;
+
             white-space: nowrap;
         }
 
 
         .file-type {
 
-            margin-top: 2px;
+            margin-top: 1px;
 
-            font-size: 12px;
+            font-size: 11px;
 
             color: #9ca3af;
         }
 
 
         /* =========================================
-           DOCUMENT AREA
+           CLOSE
+        ========================================= */
+
+        .close {
+
+            margin-left: auto;
+
+            border: 1px solid #e5e7eb;
+
+            background: #ffffff;
+
+            color: #374151;
+
+            padding: 8px 14px;
+
+            border-radius: 9px;
+
+            font-size: 13px;
+
+            cursor: pointer;
+
+            box-shadow:
+                0 2px 5px rgba(0, 0, 0, 0.08);
+        }
+
+
+        .close:hover {
+
+            background: #f9fafb;
+        }
+
+
+        /* =========================================
+           DOCUMENT VIEWER
         ========================================= */
 
         .viewer {
 
+            position: absolute;
+
+            top: 58px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+
+            overflow: auto;
+
+            padding: 28px 20px 60px;
+
+            background: #eef1f5;
+        }
+
+
+        #docx-container {
+
             width: 100%;
-            height: calc(100vh - 64px);
-
-            overflow-y: auto;
-            overflow-x: hidden;
-
-            padding: 36px 24px 60px;
 
             display: flex;
-            justify-content: center;
 
-            background:
-                radial-gradient(
-                    circle at 20% 20%,
-                    rgba(99, 102, 241, 0.04),
-                    transparent 30%
-                ),
-                #f5f7fb;
+            flex-direction: column;
+
+            align-items: center;
         }
 
 
         /* =========================================
-           PAPER
+           DOCX-PREVIEW PAGES
         ========================================= */
 
-        .document-page {
+        .docx-wrapper {
 
-            width: min(
-                850px,
-                calc(100vw - 48px)
-            );
+            width: 100%;
 
-            min-height: 1100px;
+            display: flex;
 
-            padding: 72px 78px;
+            flex-direction: column;
 
-            background: #ffffff;
+            align-items: center;
+        }
+
+
+        .docx-wrapper > section.docx {
+
+            margin-bottom: 24px !important;
+
+            box-shadow:
+                0 3px 14px rgba(0, 0, 0, 0.12);
 
             border: 1px solid #e5e7eb;
 
-            border-radius: 4px;
-
-            box-shadow:
-                0 12px 35px rgba(0, 0, 0, 0.08),
-                0 2px 8px rgba(0, 0, 0, 0.04);
-
-            color: #202124;
-
-            line-height: 1.65;
+            background: #ffffff;
         }
 
 
         /* =========================================
-           DOCUMENT TYPOGRAPHY
+           IMAGES
         ========================================= */
 
-        .paragraph {
+        #docx-container img {
 
-            margin: 0 0 16px;
+            max-width: 100%;
 
-            font-size: 15px;
-
-            line-height: 1.7;
-
-            color: #374151;
-
-            white-space: pre-wrap;
-
-            word-wrap: break-word;
-        }
-
-
-        .heading {
-
-            margin-top: 30px;
-            margin-bottom: 14px;
-
-            color: #111827;
-
-            font-weight: 700;
-
-            line-height: 1.3;
-        }
-
-
-        .heading:first-child {
-
-            margin-top: 0;
-        }
-
-
-        .title {
-
-            font-size: 30px;
-        }
-
-
-        .heading-1 {
-
-            font-size: 26px;
-        }
-
-
-        .heading-2 {
-
-            font-size: 22px;
-        }
-
-
-        .heading-3 {
-
-            font-size: 19px;
-        }
-
-
-        .heading-4,
-        .heading-5,
-        .heading-6 {
-
-            font-size: 17px;
+            height: auto;
         }
 
 
         /* =========================================
-           COMMON WORD STYLES
+           TABLES
         ========================================= */
 
-        .document-page strong {
+        #docx-container table {
 
-            font-weight: 700;
-            color: #111827;
+            max-width: 100%;
         }
 
 
-        .document-page em {
+        #docx-container td,
+        #docx-container th {
 
-            font-style: italic;
+            word-break: normal;
         }
 
 
         /* =========================================
-           EMPTY DOCUMENT
+           LOADING
         ========================================= */
 
-        .empty {
+        .loading {
 
-            min-height: 500px;
+            min-height: 300px;
 
             display: flex;
+
             align-items: center;
             justify-content: center;
 
-            text-align: center;
+            color: #6b7280;
 
-            color: #9ca3af;
+            font-size: 14px;
+        }
 
-            font-size: 15px;
+
+        .error {
+
+            max-width: 700px;
+
+            margin: 40px auto;
+
+            padding: 24px;
+
+            border-radius: 12px;
+
+            background: #ffffff;
+
+            border: 1px solid #fecaca;
+
+            color: #991b1b;
+
+            font-size: 14px;
         }
 
 
         /* =========================================
-           SELECTION
+           MOBILE
         ========================================= */
 
-        ::selection {
-
-            background: rgba(99, 102, 241, 0.20);
-        }
-
-
-        /* =========================================
-           SCROLLBAR
-        ========================================= */
-
-        .viewer::-webkit-scrollbar {
-
-            width: 10px;
-        }
-
-        .viewer::-webkit-scrollbar-track {
-
-            background: #eef0f4;
-        }
-
-        .viewer::-webkit-scrollbar-thumb {
-
-            background: #c7cbd3;
-
-            border-radius: 10px;
-
-            border: 2px solid #eef0f4;
-        }
-
-        .viewer::-webkit-scrollbar-thumb:hover {
-
-            background: #aeb4bf;
-        }
-
-
-        /* =========================================
-           RESPONSIVE
-        ========================================= */
-
-        @media (max-width: 900px) {
-
-            .viewer {
-
-                padding:
-                    24px
-                    16px
-                    40px;
-            }
-
-            .document-page {
-
-                width: 100%;
-
-                padding:
-                    55px
-                    45px;
-            }
-
-            .file-name {
-
-                max-width: 350px;
-            }
-        }
-
-
-        @media (max-width: 600px) {
+        @media (max-width: 700px) {
 
             .topbar {
 
-                padding: 0 12px;
-            }
-
-            .file-type {
-
-                display: none;
+                padding: 0 10px;
             }
 
             .file-name {
 
-                max-width: 210px;
+                max-width: 220px;
             }
 
             .viewer {
 
                 padding:
-                    12px
+                    15px
                     8px
-                    30px;
+                    35px;
             }
 
-            .document-page {
-
-                width: 100%;
-
-                min-height: auto;
-
-                padding:
-                    36px
-                    28px;
-
-                border-radius: 3px;
-            }
-
-            .title {
-
-                font-size: 25px;
-            }
-
-            .heading-1 {
-
-                font-size: 22px;
-            }
-
-            .heading-2 {
-
-                font-size: 19px;
-            }
-
-            .paragraph {
-
-                font-size: 14px;
-            }
         }
 
     </style>
@@ -474,9 +378,9 @@
 <body>
 
 
-    <!-- =====================================
+    <!-- =========================================
          TOP BAR
-    ====================================== -->
+    ========================================= -->
 
     <div class="topbar">
 
@@ -512,7 +416,7 @@
             </div>
 
 
-            <div>
+            <div class="file-details">
 
                 <div class="file-name">
                     {{ file_name }}
@@ -526,133 +430,268 @@
 
         </div>
 
+
+        <button
+            class="close"
+            type="button"
+            onclick="
+                window.parent.postMessage(
+                    {
+                        type:
+                            'CLOUDNEXUS_CLOSE_VIEWER'
+                    },
+                    window.location.origin
+                )
+            "
+        >
+            Close
+        </button>
+
     </div>
 
 
-    <!-- =====================================
-         DOCUMENT VIEWER
-    ====================================== -->
+    <!-- =========================================
+         DOCUMENT
+    ========================================= -->
 
     <main class="viewer">
 
-        <article class="document-page">
+        <div id="docx-container"></div>
 
-            {% if paragraphs %}
+<script>
+async function loadDocx() {
+    const fileId = "{{ file_id }}";
 
-                {% for paragraph in paragraphs %}
+    const response = await fetch(
+        `/api/files/${fileId}/content`,
+        {
+            credentials: "same-origin"
+        }
+    );
 
-                    {% set style =
-                        paragraph.style|lower
-                    %}
+    if (!response.ok) {
+        throw new Error(
+            `DOCX download failed: ${response.status}`
+        );
+    }
 
-                    {% if
-                        "title" in style
-                    %}
+    const arrayBuffer =
+        await response.arrayBuffer();
 
-                        <div
-                            class="heading title"
-                        >
-                            {{ paragraph.text }}
-                        </div>
+    console.log(
+        "DOCX downloaded:",
+        arrayBuffer.byteLength,
+        "bytes"
+    );
 
+    const container =
+        document.getElementById("docx-container");
 
-                    {% elif
-                        "heading 1" in style
-                    %}
+    container.innerHTML = "";
 
-                        <div
-                            class="heading heading-1"
-                        >
-                            {{ paragraph.text }}
-                        </div>
+    await docx.renderAsync(
+        arrayBuffer,
+        container,
+        null,
+        {
+            className: "cloudnexus-docx",
+            inWrapper: true,
+            breakPages: true,
+            ignoreWidth: false,
+            ignoreHeight: false,
+            ignoreFonts: false
+        }
+    );
 
+    console.log("DOCX rendered successfully");
+}
 
-                    {% elif
-                        "heading 2" in style
-                    %}
+loadDocx().catch(error => {
+    console.error(
+        "DOCX rendering failed:",
+        error
+    );
 
-                        <div
-                            class="heading heading-2"
-                        >
-                            {{ paragraph.text }}
-                        </div>
+    document.getElementById(
+        "docx-container"
+    ).innerHTML = `
+        <div style="
+            padding:40px;
+            color:#b91c1c;
+            background:#fff;
+            border:1px solid #fecaca;
+            border-radius:12px;
+        ">
+            <h2>Could not render Word document</h2>
+            <p>${error.message}</p>
+        </div>
+    `;
+});
+</script>
 
+            <div class="loading">
+                Loading Word document...
+            </div>
 
-                    {% elif
-                        "heading 3" in style
-                    %}
-
-                        <div
-                            class="heading heading-3"
-                        >
-                            {{ paragraph.text }}
-                        </div>
-
-
-                    {% elif
-                        "heading 4" in style
-                    %}
-
-                        <div
-                            class="heading heading-4"
-                        >
-                            {{ paragraph.text }}
-                        </div>
-
-
-                    {% elif
-                        "heading 5" in style
-                    %}
-
-                        <div
-                            class="heading heading-5"
-                        >
-                            {{ paragraph.text }}
-                        </div>
-
-
-                    {% elif
-                        "heading 6" in style
-                    %}
-
-                        <div
-                            class="heading heading-6"
-                        >
-                            {{ paragraph.text }}
-                        </div>
-
-
-                    {% else %}
-
-                        <p class="paragraph">
-                            {{ paragraph.text }}
-                        </p>
-
-                    {% endif %}
-
-                {% endfor %}
-
-            {% else %}
-
-                <div class="empty">
-
-                    This document doesn't
-                    contain readable text.
-
-                </div>
-
-            {% endif %}
-
-        </article>
+        </div>
 
     </main>
 
 
-    <!-- =====================================
-         DOCX SELECTION → CLOUDNEXUS AI
-    ====================================== -->
-
+    <!-- =========================================
+         DOCX PREVIEW LIBRARY
+    ========================================= -->
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/docx-preview@0.4.1/dist/docx-preview.min.js"></script>
+    <script src="/static/docx/docx-preview.min.js"></script>
     <script>
+
+        const fileId =
+            "{{ file_id }}";
+
+
+        const container =
+            document.getElementById(
+                "docx-container"
+            );
+
+
+        async function loadDocx() {
+
+            try {
+
+                console.log(
+                    "Loading DOCX:",
+                    fileId
+                );
+
+
+                const response =
+                    await fetch(
+                        `/api/files/${encodeURIComponent(fileId)}/content`,
+                        {
+                            method: "GET",
+                            credentials: "same-origin"
+                        }
+                    );
+
+
+                if (!response.ok) {
+
+                    throw new Error(
+                        `DOCX request failed: ${response.status}`
+                    );
+
+                }
+
+
+                const buffer =
+                    await response.arrayBuffer();
+
+
+                console.log(
+                    "DOCX downloaded:",
+                    buffer.byteLength,
+                    "bytes"
+                );
+
+
+                if (!buffer.byteLength) {
+
+                    throw new Error(
+                        "DOCX file is empty."
+                    );
+
+                }
+
+
+                container.innerHTML = "";
+                
+
+                await docx.renderAsync(
+                    buffer,
+                    container,
+                    null,
+                    {
+                        className:
+                            "docx",
+
+                        inWrapper:
+                            true,
+
+                        ignoreWidth:
+                            false,
+
+                        ignoreHeight:
+                            false,
+
+                        ignoreFonts:
+                            false,
+
+                        breakPages:
+                            true,
+
+                        renderHeaders:
+                            true,
+
+                        renderFooters:
+                            true,
+
+                        renderFootnotes:
+                            true,
+
+                        renderEndnotes:
+                            true,
+
+                        useBase64URL:
+                            true,
+
+                        experimental:
+                            true
+                    }
+                );
+
+
+                console.log(
+                    "DOCX rendered successfully"
+                );
+
+
+            } catch (error) {
+
+                console.error(
+                    "DOCX rendering failed:",
+                    error
+                );
+
+
+                container.innerHTML = `
+
+                    <div class="error">
+
+                        <h3>
+                            Could not render Word document
+                        </h3>
+
+                        <p>
+                            ${error.message}
+                        </p>
+
+                    </div>
+
+                `;
+
+            }
+
+        }
+
+
+        loadDocx();
+
+
+        /* =========================================
+           TEXT SELECTION → CLOUDNEXUS AI
+        ========================================= */
 
         document.addEventListener(
             "mouseup",
@@ -661,12 +700,17 @@
                 const selection =
                     window.getSelection();
 
+
                 if (!selection) {
                     return;
                 }
 
+
                 const text =
-                    selection.toString().trim();
+                    selection
+                        .toString()
+                        .trim();
+
 
                 if (!text) {
                     return;

@@ -19,6 +19,7 @@
   },
   "homepage": "https://github.com/vedant338/Cloud_Nexus_AI#readme",
   "dependencies": {
+    "docx-preview": "^0.4.1",
     "jszip": "^3.10.2",
     "lodash": "^4.18.1",
     "lodash-es": "^4.18.1",

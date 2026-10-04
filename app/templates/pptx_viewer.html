@@ -137,28 +137,24 @@
        ========================= */
 
     .viewer {
-        position: relative;
+    width: 100%;
+    height: calc(100vh - 64px);
 
-        width: 100%;
-        height: calc(100vh - 64px);
+    overflow-y: auto;
+    overflow-x: hidden;
 
-        padding: 28px;
+    padding: 36px 24px 60px;
 
-        display: flex;
-        align-items: center;
-        justify-content: center;
+    display: block;
 
-        overflow: auto;
-
-        background:
-            radial-gradient(
-                circle at 20% 20%,
-                rgba(99, 102, 241, 0.04),
-                transparent 30%
-            ),
-            #f5f7fb;
-    }
-
+    background:
+        radial-gradient(
+            circle at 20% 20%,
+            rgba(99, 102, 241, 0.04),
+            transparent 30%
+        ),
+        #f5f7fb;
+}
     /* =========================
        PRESENTATION FRAME
        ========================= */

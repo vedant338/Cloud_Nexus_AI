@@ -556,26 +556,27 @@ function openPreview(item) {
     // ==========================================
     // PDF
     // ==========================================
+     if (extension === "pdf") {
 
-    if (extension === "pdf") {
+    const pdfUrl =
+        `/pdf-viewer?file=${encodeURIComponent(
+            `/api/files/${fileId}/content`
+        )}`;
 
-        const pdfUrl =
-            `/pdf-viewer?file=${encodeURIComponent(
-                `/api/files/${fileId}/content`
-            )}`;
+    console.log(
+        "OPENING PDF:",
+        pdfUrl
+    );
 
-        console.log(
-            "OPENING PDF:",
-            pdfUrl
-        );
+    // SHOW PREVIEW
+    els.previewWrap.classList.remove("hidden");
 
-        els.previewFrame.src =
-            pdfUrl;
+    // LOAD PDF VIEWER
+    els.previewFrame.src =
+        pdfUrl;
 
-        return;
-    }
-
-
+    return;
+}
     // ==========================================
     // OTHER FILES
     // ==========================================
@@ -775,7 +776,6 @@ async function uploadFiles(
 /* =========================================================
    CHAT
    ========================================================= */
-
 function addBubble(
   role,
   text
@@ -790,6 +790,572 @@ function addBubble(
   div.textContent = text;
 
   els.chat.appendChild(div);
+
+  els.chat.scrollTop =
+    els.chat.scrollHeight;
+}
+
+
+/* =========================================================
+   ASSISTANT ANSWER + SOURCES
+   ========================================================= */
+/* =========================================================
+   RAG CITATION NAVIGATION
+========================================================= */
+function openCitation(citation) {
+    console.log("CITATION CLICKED:", citation);
+
+    if (!citation) return;
+
+    const fileId = citation.file_id;
+
+    if (!fileId) {
+        console.warn(
+            "Citation has no file_id:",
+            citation
+        );
+        return;
+    }
+
+    const fileName =
+        citation.file_name || "";
+
+    const extension =
+        fileName
+            .split(".")
+            .pop()
+            .toLowerCase();
+
+    const page =
+        Number(citation.page) || 1;
+
+    const highlightText =
+        String(citation.text || "").trim();
+
+    console.log(
+        "Citation file:",
+        fileId
+    );
+
+    console.log(
+        "Citation filename:",
+        fileName
+    );
+
+    console.log(
+        "Citation type:",
+        extension
+    );
+
+    console.log(
+        "Citation page:",
+        page
+    );
+
+    console.log(
+        "Citation text:",
+        highlightText
+    );
+
+    /* --------------------------------
+       Select source file
+    -------------------------------- */
+
+    state.selected.clear();
+
+    state.selected.add(
+        fileId
+    );
+
+    refreshGridSelection();
+    updateScope();
+
+    /* --------------------------------
+       PDF
+    -------------------------------- */
+
+    if (
+        extension === "pdf"
+    ) {
+
+        const pdfFile =
+            `/api/files/${fileId}/content`;
+
+        const viewerUrl =
+            `/pdf-viewer?file=${encodeURIComponent(
+                pdfFile
+            )}&page=${encodeURIComponent(
+                page
+            )}&highlight=${encodeURIComponent(
+                highlightText
+            )}`;
+
+        console.log(
+            "OPENING PDF CITATION:",
+            viewerUrl
+        );
+
+        if (els.previewWrap) {
+            els.previewWrap.classList.remove(
+                "hidden"
+            );
+        }
+
+        if (els.previewFrame) {
+            els.previewFrame.src =
+                viewerUrl;
+        }
+
+        return;
+    }
+
+    /* --------------------------------
+       DOCX
+    -------------------------------- */
+
+    if (
+        extension === "docx"
+    ) {
+
+        const viewerUrl =
+            `/docx-viewer?file_id=${encodeURIComponent(
+                fileId
+            )}&highlight=${encodeURIComponent(
+                highlightText
+            )}`;
+
+        console.log(
+            "OPENING DOCX CITATION:",
+            viewerUrl
+        );
+
+        if (els.previewWrap) {
+            els.previewWrap.classList.remove(
+                "hidden"
+            );
+        }
+
+        if (els.previewFrame) {
+            els.previewFrame.src =
+                viewerUrl;
+        }
+
+        return;
+    }
+
+    /* --------------------------------
+       PPTX
+    -------------------------------- */
+
+    if (
+        extension === "pptx"
+    ) {
+
+        const viewerUrl =
+            `/pptx-viewer?file_id=${encodeURIComponent(
+                fileId
+            )}`;
+
+        console.log(
+            "OPENING PPTX CITATION:",
+            viewerUrl
+        );
+
+        if (els.previewWrap) {
+            els.previewWrap.classList.remove(
+                "hidden"
+            );
+        }
+
+        if (els.previewFrame) {
+            els.previewFrame.src =
+                viewerUrl;
+        }
+
+        return;
+    }
+
+    /* --------------------------------
+       TXT / MD
+    -------------------------------- */
+
+    if (
+        extension === "txt"
+    ) {
+
+        const viewerUrl =
+            `/txt-viewer?file_id=${encodeURIComponent(
+                fileId
+            )}`;
+
+        if (els.previewWrap) {
+            els.previewWrap.classList.remove(
+                "hidden"
+            );
+        }
+
+        if (els.previewFrame) {
+            els.previewFrame.src =
+                viewerUrl;
+        }
+
+        return;
+    }
+
+    if (
+        extension === "md" ||
+        extension === "markdown"
+    ) {
+
+        openMarkdownViewer({
+            id: fileId,
+            name: fileName
+        });
+
+        return;
+    }
+
+    console.warn(
+        "Unsupported citation file type:",
+        extension
+    );
+}
+/* =========================================================
+   CLICKABLE AI CITATIONS
+========================================================= */
+
+function renderClickableAnswer(
+    container,
+    answer,
+    citations
+) {
+
+    container.innerHTML = "";
+
+    const text =
+        String(answer || "");
+
+    const citationRegex =
+        /\[(\d+)\]/g;
+
+    let lastIndex = 0;
+
+    let match;
+
+
+    while (
+        (match =
+            citationRegex.exec(text)) !== null
+    ) {
+
+        /*
+         * Normal text before citation
+         */
+
+        if (
+            match.index >
+            lastIndex
+        ) {
+
+            container.appendChild(
+                document.createTextNode(
+                    text.slice(
+                        lastIndex,
+                        match.index
+                    )
+                )
+            );
+        }
+
+
+        /*
+         * Citation number
+         */
+
+        const citationNumber =
+            Number(match[1]);
+
+        const citation =
+            citations.find(
+                (item) =>
+                    Number(item.rank) ===
+                    citationNumber
+            );
+
+
+        if (citation) {
+
+            const button =
+                document.createElement(
+                    "button"
+                );
+
+            button.type =
+                "button";
+
+            button.className =
+                "inline-citation";
+
+            button.textContent =
+                `[${citationNumber}]`;
+
+            button.title =
+                citation.page
+                    ? `${citation.file_name} — Page ${citation.page}`
+                    : citation.slide
+                    ? `${citation.file_name} — Slide ${citation.slide}`
+                    : citation.file_name ||
+                      "Open source";
+
+
+            button.addEventListener(
+                "click",
+                () => {
+
+                    console.log(
+                        "INLINE CITATION CLICKED:",
+                        citation
+                    );
+
+                    openCitation(
+                        citation
+                    );
+                }
+            );
+
+
+            container.appendChild(
+                button
+            );
+
+        } else {
+
+            /*
+             * If the LLM mentions a citation
+             * that wasn't returned by RAG,
+             * keep it as normal text.
+             */
+
+            container.appendChild(
+                document.createTextNode(
+                    match[0]
+                )
+            );
+        }
+
+
+        lastIndex =
+            citationRegex.lastIndex;
+    }
+
+
+    /*
+     * Remaining text
+     */
+
+    if (
+        lastIndex <
+        text.length
+    ) {
+
+        container.appendChild(
+            document.createTextNode(
+                text.slice(lastIndex)
+            )
+        );
+    }
+}
+
+function addAssistantBubble(
+  answer,
+  citations = []
+) {
+
+  const div =
+    document.createElement("div");
+
+  div.className =
+    "bubble assistant";
+
+
+  /* -----------------------------------------
+     ANSWER
+  ----------------------------------------- */
+
+  const answerDiv =
+    document.createElement("div");
+
+  answerDiv.className =
+    "assistant-answer";
+
+  /*
+   * Keep the LLM citation numbers such as
+   * [1], [2], [3] visible.
+   */
+  renderClickableAnswer(answerDiv,answer,citations);
+
+  div.appendChild(
+    answerDiv
+  );
+
+
+  /* -----------------------------------------
+     SOURCES
+  ----------------------------------------- */
+
+  if (
+    Array.isArray(citations) &&
+    citations.length
+  ) {
+
+    const sources =
+      document.createElement("div");
+
+    sources.className =
+      "rag-sources";
+
+
+    const title =
+      document.createElement("div");
+
+    title.className =
+      "rag-sources-title";
+
+    title.textContent =
+      "Sources";
+
+    sources.appendChild(
+      title
+    );
+
+
+    citations.forEach(
+      (citation) => {
+
+        const source =
+          document.createElement("div");
+
+        source.className =
+          "rag-source";
+        source.style.cursor = "pointer";
+        source.addEventListener("click",() => {
+          openCitation(citation); }
+         );
+
+
+        /* Source header */
+
+        const header =
+          document.createElement("div");
+
+        header.className =
+          "rag-source-header";
+
+
+        const icon =
+          document.createElement("span");
+
+        icon.className =
+          "rag-source-icon";
+
+        icon.textContent =
+          "📄";
+
+
+        const name =
+          document.createElement("span");
+
+        name.className =
+          "rag-source-name";
+
+        name.textContent =
+          citation.file_name ||
+          "Unknown file";
+
+
+        header.appendChild(
+          icon
+        );
+
+        header.appendChild(
+          name
+        );
+
+
+        /* Page / slide */
+
+        const location =
+          document.createElement("span");
+
+        location.className =
+          "rag-source-location";
+
+
+        if (citation.page) {
+
+          location.textContent =
+            `Page ${citation.page}`;
+
+        } else if (
+          citation.slide
+        ) {
+
+          location.textContent =
+            `Slide ${citation.slide}`;
+
+        } else {
+
+          location.textContent =
+            "Document";
+        }
+
+
+        header.appendChild(
+          location
+        );
+
+
+        source.appendChild(
+          header
+        );
+
+
+        /* Retrieved text */
+
+        if (citation.text) {
+
+          const preview =
+            document.createElement("div");
+
+          preview.className =
+            "rag-source-text";
+
+          preview.textContent =
+            citation.text;
+
+          source.appendChild(
+            preview
+          );
+        }
+
+
+        sources.appendChild(
+          source
+        );
+      }
+    );
+
+
+    div.appendChild(
+      sources
+    );
+  }
+
+
+  els.chat.appendChild(
+    div
+  );
+
 
   els.chat.scrollTop =
     els.chat.scrollHeight;
@@ -1125,11 +1691,10 @@ els.chatForm.addEventListener(
 
       removeThinkingBubble();
 
-      addBubble(
-        "assistant",
-        res.answer
+      addAssistantBubble(
+        res.answer,
+        res.citations || []
       );
-
 
     } catch (err) {
 
@@ -2294,8 +2859,7 @@ if (action.id === "ask") {
 /* =========================================================
    HIGHLIGHT
    ========================================================= */
-
-function highlightSelectedText() {
+function  highlightSelectedText() {
 
   if (!actionSelectionRange) {
     return;
@@ -2631,6 +3195,7 @@ async function highlightSelectedPDFText(text) {
     window.location.origin
   );
 }
+
 
 function openMarkdownViewer(item) {
 

@@ -1,23 +1,731 @@
-eventBus.on(
-    "pagesinit",
-    () => {
-        console.log("PDF.js pages initialized");
+<!DOCTYPE html>
+<html lang="en">
 
-        requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-                try {
-                    pdfViewer.currentScaleValue = "page-width";
-                    console.log("PDF scale applied");
-                } catch (error) {
-                    console.error(
-                        "PDF scale failed:",
-                        error
-                    );
-                }
-            });
-        });
-    },
-    {
-        once: true
-    }
+<head>
+    <meta charset="UTF-8">
+    <title>CloudNexus PDF Viewer</title>
+
+    <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #525659;
+        }
+
+        #viewerContainer {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background: #525659;
+        }
+
+        #viewer {
+            width: 100%;
+            padding: 30px 0 50px;
+            box-sizing: border-box;
+        }
+
+        .pdf-page {
+            position: relative;
+            margin: 0 auto 25px;
+            background: white;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+        }
+
+        .pdf-page canvas {
+            display: block;
+        }
+
+        .pdf-text-layer {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    line-height: 1;
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.pdf-text-layer span {
+    position: absolute;
+    white-space: pre;
+    transform-origin: 0 0;
+    color: transparent;
+    cursor: text;
+}
+
+.pdf-text-layer .rag-highlight {
+    background: rgba(255, 221, 64, 0.55);
+    border-radius: 3px;
+}
+
+        .loading {
+            color: white;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .error {
+            color: #ffdddd;
+            font-family: Arial, sans-serif;
+            padding: 40px;
+        }
+    </style>
+</head>
+
+<body>
+
+<div id="viewerContainer">
+    <div id="viewer">
+        <div class="loading">
+            Loading PDF...
+        </div>
+    </div>
+</div>
+
+<script type="module">
+
+import {
+    getDocument,
+    GlobalWorkerOptions
+} from "/static/pdfjs/build/pdf.mjs";
+
+
+/* --------------------------------
+   GET PDF URL
+-------------------------------- */
+
+const params =
+    new URLSearchParams(window.location.search);
+
+const file =
+    params.get("file");
+const requestedPage =
+    Math.max(
+        1,
+        Number(
+            params.get("page") || 1
+        )
+    );
+const requestedHighlight =
+    (
+        params.get("highlight") || ""
+    ).trim();
+
+
+if (!file) {
+
+    document.body.innerHTML = `
+        <div class="error">
+            No PDF specified.
+        </div>
+    `;
+
+    throw new Error("No PDF specified");
+}
+
+
+/* --------------------------------
+   PDF.js worker
+-------------------------------- */
+
+GlobalWorkerOptions.workerSrc =
+    "/static/pdfjs/build/pdf.worker.mjs";
+
+
+const viewer =
+    document.getElementById("viewer");
+
+
+console.log(
+    "CloudNexus PDF URL:",
+    file
 );
+
+async function createTextLayer(
+    page,
+    viewport,
+    pageContainer
+) {
+    const textContent =
+        await page.getTextContent();
+
+    const textLayer =
+        document.createElement("div");
+
+    textLayer.className =
+        "pdf-text-layer";
+
+    textLayer.style.width =
+        `${viewport.width}px`;
+
+    textLayer.style.height =
+        `${viewport.height}px`;
+
+    pageContainer.appendChild(
+        textLayer
+    );
+
+    /*
+     * Create a span for every PDF text item.
+     */
+
+    for (
+        const item of textContent.items
+    ) {
+
+        if (!item.str) {
+            continue;
+        }
+
+        const span =
+            document.createElement("span");
+
+        span.textContent =
+            item.str;
+
+        /*
+         * PDF.js text transform.
+         */
+
+        const tx =
+            item.transform;
+
+        const x =
+            tx[4] *
+            viewport.scale;
+
+        const y =
+            viewport.height -
+            (
+                tx[5] *
+                viewport.scale
+            );
+
+        const fontSize =
+            Math.abs(
+                tx[3]
+            ) *
+            viewport.scale;
+
+        span.style.left =
+            `${x}px`;
+
+        span.style.top =
+            `${y - fontSize}px`;
+
+        span.style.fontSize =
+            `${fontSize}px`;
+
+        /*
+         * Approximate width.
+         */
+
+        if (item.width) {
+
+            span.style.width =
+                `${item.width * viewport.scale}px`;
+        }
+
+        textLayer.appendChild(
+            span
+        );
+    }
+
+    return textLayer;
+}
+
+
+/* --------------------------------
+   LOAD AND RENDER PDF
+-------------------------------- */
+
+async function loadPDF() {
+
+    try {
+
+        console.log("======================");
+        console.log("FETCHING PDF:");
+        console.log(file);
+        console.log("======================");
+
+
+        /* Fetch PDF from FastAPI */
+
+        const response =
+            await fetch(file, {
+                method: "GET",
+                credentials: "same-origin"
+            });
+
+
+        if (!response.ok) {
+
+            throw new Error(
+                `PDF request failed: ${response.status} ${response.statusText}`
+            );
+        }
+
+
+        console.log(
+            "PDF response:",
+            response.status
+        );
+
+
+        /* Convert response to ArrayBuffer */
+
+        const pdfData =
+            await response.arrayBuffer();
+
+
+        console.log(
+            "PDF downloaded:",
+            pdfData.byteLength,
+            "bytes"
+        );
+
+
+        if (!pdfData.byteLength) {
+
+            throw new Error(
+                "PDF response is empty."
+            );
+        }
+
+
+        /* --------------------------------
+           PDF.js LOAD
+        -------------------------------- */
+
+        const loadingTask =
+            getDocument({
+                data: pdfData
+            });
+
+
+        loadingTask.onProgress =
+            ({ loaded, total }) => {
+
+                console.log(
+                    `PDF.js loading: ${loaded}/${total || "?"}`
+                );
+            };
+
+
+        const pdf =
+            await loadingTask.promise;
+
+
+        console.log(
+            "PDF loaded successfully:",
+            pdf.numPages,
+            "pages"
+        );
+
+
+        /* Remove Loading... */
+
+        viewer.innerHTML = "";
+
+
+        /* --------------------------------
+           RENDER EVERY PAGE
+        -------------------------------- */
+
+        for (
+            let pageNumber = 1;
+            pageNumber <= pdf.numPages;
+            pageNumber++
+        ) {
+
+            console.log(
+                "Rendering PDF page:",
+                pageNumber
+            );
+
+
+            /* Get page */
+
+            const page =
+                await pdf.getPage(pageNumber);
+
+
+            /* Base size */
+
+            const baseViewport =
+                page.getViewport({
+                    scale: 1
+                });
+
+
+            /*
+             * Available viewer width.
+             */
+
+            const availableWidth =
+                viewer.clientWidth - 60;
+
+
+            /*
+             * Calculate scale.
+             */
+
+            const scale =
+                Math.min(
+                    1.5,
+                    Math.max(
+                        0.8,
+                        availableWidth /
+                        baseViewport.width
+                    )
+                );
+
+
+            /* Create viewport */
+
+            const viewport =
+                page.getViewport({
+                    scale: scale
+                });
+
+
+            /* --------------------------------
+               PAGE CONTAINER
+            -------------------------------- */
+
+            const pageContainer =
+                document.createElement("div");
+
+
+            pageContainer.className =
+                "pdf-page";
+
+
+            pageContainer.dataset.pageNumber =
+                pageNumber;
+
+
+            pageContainer.style.width =
+                `${viewport.width}px`;
+
+
+            pageContainer.style.height =
+                `${viewport.height}px`;
+
+
+            /* --------------------------------
+               CANVAS
+            -------------------------------- */
+
+            const canvas =
+                document.createElement("canvas");
+
+
+            const context =
+                canvas.getContext("2d");
+
+
+            /*
+             * High DPI rendering.
+             */
+
+            const devicePixelRatio =
+                window.devicePixelRatio || 1;
+
+
+            canvas.width =
+                Math.floor(
+                    viewport.width *
+                    devicePixelRatio
+                );
+
+
+            canvas.height =
+                Math.floor(
+                    viewport.height *
+                    devicePixelRatio
+                );
+
+
+            canvas.style.width =
+                `${viewport.width}px`;
+
+
+            canvas.style.height =
+                `${viewport.height}px`;
+
+
+            context.setTransform(
+                devicePixelRatio,
+                0,
+                0,
+                devicePixelRatio,
+                0,
+                0
+            );
+
+
+            /* Add canvas */
+
+            pageContainer.appendChild(
+                canvas
+            );
+
+
+            viewer.appendChild(
+                pageContainer
+            );
+
+
+            /* --------------------------------
+               RENDER PAGE
+            -------------------------------- */
+
+            await page.render({
+                canvasContext: context,
+                viewport: viewport
+            }).promise;
+            const textLayer = await createTextLayer(
+            page,
+            viewport,
+            pageContainer
+            );
+            pageContainer._textLayer =    textLayer;
+
+            console.log(
+                "PDF page rendered:",
+                pageNumber
+            );
+        }
+
+
+        console.log(
+            "ALL PDF PAGES RENDERED"
+        );
+        /* --------------------------------
+        JUMP TO CITED PAGE
+        -------------------------------- */
+
+        if (requestedPage >= 1 && requestedPage <= pdf.numPages) {
+
+    const targetPage =
+        document.querySelector(
+            `.pdf-page[data-page-number="${requestedPage}"]`
+        );
+
+    if (targetPage) {
+
+        targetPage.scrollIntoView({
+            behavior: "smooth",
+            block: "start"
+        });
+
+        console.log(
+            "Jumped to PDF page:",
+            requestedPage
+        );
+        if (requestedHighlight) {
+
+    setTimeout(
+        () => {
+
+            highlightRAGText(
+                requestedPage,
+                requestedHighlight
+            );
+
+        },
+        100
+    );
+}
+    }
+}
+
+
+    } catch (error) {
+
+        console.error(
+            "CloudNexus PDF loading failed:",
+            error
+        );
+
+
+        viewer.innerHTML = `
+            <div class="error">
+
+                <h2>
+                    Could not render PDF
+                </h2>
+
+                <p>
+                    ${error.message}
+                </p>
+
+            </div>
+        `;
+    }
+}
+
+
+/* Start */
+async function highlightRAGText(
+    pageNumber,
+    searchText
+) {
+
+    if (!searchText) {
+        return;
+    }
+
+    const page =
+        document.querySelector(
+            `.pdf-page[data-page-number="${pageNumber}"]`
+        );
+
+    if (!page) {
+        console.warn(
+            "RAG page not found:",
+            pageNumber
+        );
+        return;
+    }
+
+    const textLayer =
+        page.querySelector(
+            ".pdf-text-layer"
+        );
+
+    if (!textLayer) {
+        console.warn(
+            "Text layer not found"
+        );
+        return;
+    }
+
+    const spans =
+        [...textLayer.querySelectorAll(
+            "span"
+        )];
+
+    /*
+     * Build searchable page text.
+     */
+
+    const fullText =
+        spans
+            .map(
+                span =>
+                    span.textContent
+            )
+            .join(" ")
+            .replace(
+                /\s+/g,
+                " "
+            )
+            .trim()
+            .toLowerCase();
+
+    const target =
+        searchText
+            .replace(
+                /\s+/g,
+                " "
+            )
+            .trim()
+            .toLowerCase();
+
+    if (!target) {
+        return;
+    }
+
+    const index =
+        fullText.indexOf(
+            target
+        );
+
+    if (index === -1) {
+
+        console.warn(
+            "RAG text not found on page:",
+            searchText
+        );
+
+        return;
+    }
+
+    console.log(
+        "RAG text found on page:",
+        pageNumber
+    );
+
+    /*
+     * Find which spans contain
+     * the retrieved passage.
+     */
+
+    let currentPosition = 0;
+
+    for (const span of spans) {
+
+        const spanText =
+            span.textContent || "";
+
+        const spanStart =
+            currentPosition;
+
+        const spanEnd =
+            spanStart +
+            spanText.length;
+
+        const targetStart =
+            index;
+
+        const targetEnd =
+            index +
+            target.length;
+
+        if (
+            spanEnd > targetStart &&
+            spanStart < targetEnd
+        ) {
+
+            span.classList.add(
+                "rag-highlight"
+            );
+        }
+
+        currentPosition =
+            spanEnd + 1;
+    }
+
+    const first =
+        textLayer.querySelector(
+            ".rag-highlight"
+        );
+
+    if (first) {
+
+        first.scrollIntoView({
+            behavior: "smooth",
+            block: "center"
+        });
+
+        console.log(
+            "RAG passage highlighted"
+        );
+    }
+}
+
+loadPDF();
+
+</script>
+
+</body>
+</html>

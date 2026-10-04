@@ -373,6 +373,7 @@ async def upload_file(
             local_path=temp_path,
             mime=mime,
             folder_id=folder_id,
+            original_filename=filename,
         )
 
 
@@ -577,6 +578,7 @@ async def create_short_note(
             local_path=temp_path,
             mime=mime,
             folder_id=body.folder_id,
+            original_filename=filename,
         )
 
 

@@ -21,19 +21,18 @@ Top-K relevant chunks
 """
 
 import os
+import re
+import chromadb 
+
+from rapidfuzz.fuzz import partial_ratio 
 from pathlib import Path
 from typing import Any
 
-import chromadb
 from dotenv import load_dotenv
 from rank_bm25 import BM25Okapi
 
 from langchain_core.documents import Document
-from langchain_community.document_loaders import (
-    PyPDFLoader,
-    Docx2txtLoader,
-    TextLoader,
-)
+from langchain_community.document_loaders import (PyPDFLoader,Docx2txtLoader,TextLoader,)
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
@@ -82,8 +81,8 @@ collection = chroma_client.get_or_create_collection(
 # ============================================================
 
 splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=200,
+    chunk_size=1200,
+    chunk_overlap=250,
     separators=[
         "\n\n",
         "\n",
@@ -281,16 +280,287 @@ def _load_document(
 # ============================================================
 # NORMALIZE + CHUNK
 # ============================================================
+def _clean_chunk_text(text: str) -> str:
+    """
+    Clean extracted document text without
+    destroying useful formatting.
+    """
+
+    if not text:
+        return ""
+
+    # Normalize Windows line endings
+    text = text.replace("\r\n", "\n")
+    text = text.replace("\r", "\n")
+
+    # Remove excessive spaces
+    text = re.sub(
+        r"[ \t]+",
+        " ",
+        text,
+    )
+
+    # Remove excessive blank lines
+    text = re.sub(
+        r"\n{3,}",
+        "\n\n",
+        text,
+    )
+
+    return text.strip()
+
+def _chunk_pdf_documents(
+    documents: list[Document],
+) -> list[Document]:
+    """
+    Chunk PDFs page-by-page so chunks never cross
+    unrelated PDF pages.
+    """
+
+    chunks = []
+
+    for document in documents:
+
+        page_chunks = splitter.split_documents(
+            [document]
+        )
+
+        for chunk in page_chunks:
+
+            metadata = dict(
+                document.metadata
+            )
+
+            chunks.append(
+                Document(
+                    page_content=_clean_chunk_text(
+                        chunk.page_content
+                    ),
+                    metadata=metadata,
+                )
+            )
+
+    return chunks
+
+def _chunk_pptx_documents(
+    documents: list[Document],
+) -> list[Document]:
+    """
+    Keep PPTX chunks within their original slide.
+    """
+
+    chunks = []
+
+    for document in documents:
+
+        slide_chunks = splitter.split_documents(
+            [document]
+        )
+
+        for chunk in slide_chunks:
+
+            metadata = dict(
+                document.metadata
+            )
+
+            chunks.append(
+                Document(
+                    page_content=_clean_chunk_text(
+                        chunk.page_content
+                    ),
+                    metadata=metadata,
+                )
+            )
+
+    return chunks
+
+def _is_relevant_result(
+    score: float,
+    query: str,
+    text: str,
+) -> bool:
+    """
+    Reject clearly unrelated chunks.
+
+    A chunk is accepted when:
+    - it has meaningful keyword overlap, OR
+    - it has strong fuzzy similarity.
+
+    RRF score alone is NOT enough because RRF
+    always produces a ranking even for unrelated queries.
+    """
+
+    query_tokens = set(
+        _tokenize(query)
+    )
+
+    text_tokens = set(
+        _tokenize(text)
+    )
+
+    if not query_tokens or not text_tokens:
+        return False
+
+    # -----------------------------------------
+    # Remove generic question words
+    # -----------------------------------------
+
+    stop_words = {
+        "what",
+        "are",
+        "is",
+        "the",
+        "a",
+        "an",
+        "of",
+        "to",
+        "in",
+        "on",
+        "for",
+        "and",
+        "or",
+        "how",
+        "why",
+        "when",
+        "where",
+        "which",
+        "who",
+        "does",
+        "do",
+        "this",
+        "that",
+        "these",
+        "those",
+    }
+
+    meaningful_query_tokens = (
+        query_tokens - stop_words
+    )
+
+    if not meaningful_query_tokens:
+        return False
+
+    # -----------------------------------------
+    # Keyword overlap
+    # -----------------------------------------
+
+    overlap = (
+        len(
+            meaningful_query_tokens
+            & text_tokens
+        )
+        / len(
+            meaningful_query_tokens
+        )
+    )
+
+    # -----------------------------------------
+    # Fuzzy similarity
+    # -----------------------------------------
+
+    fuzzy_score = partial_ratio(
+        query.lower(),
+        text.lower(),
+    ) / 100.0
+
+    # -----------------------------------------
+    # Strong keyword match
+    # -----------------------------------------
+
+    if overlap >= 0.30:
+        return True
+
+    # -----------------------------------------
+    # Strong phrase similarity
+    # -----------------------------------------
+
+    if fuzzy_score >= 0.65:
+        return True
+
+    return False
 
 def _prepare_chunks(
     local_path: str,
 ) -> list[Document]:
 
-    documents = _load_document(local_path)
-
-    chunks = splitter.split_documents(
-        documents
+    documents = _load_document(
+        local_path
     )
+
+    cleaned_documents = []
+
+    for document in documents:
+
+        cleaned_text = _clean_chunk_text(
+            document.page_content
+        )
+
+        if not cleaned_text:
+            continue
+
+        cleaned_documents.append(
+            Document(
+                page_content=cleaned_text,
+                metadata=dict(
+                    document.metadata
+                ),
+            )
+        )
+
+    if not cleaned_documents:
+
+        raise ValueError(
+            "No usable text was extracted."
+        )
+
+    extension = Path(
+        local_path
+    ).suffix.lower()
+
+    # -----------------------------------------
+    # PDF
+    # -----------------------------------------
+
+    if extension == ".pdf":
+
+        chunks = _chunk_pdf_documents(
+            cleaned_documents
+        )
+
+    # -----------------------------------------
+    # PPTX
+    # -----------------------------------------
+
+    elif extension == ".pptx":
+
+        chunks = _chunk_pptx_documents(
+            cleaned_documents
+        )
+
+    # -----------------------------------------
+    # DOCX / TXT / Markdown
+    # -----------------------------------------
+
+    else:
+
+        chunks = splitter.split_documents(
+            cleaned_documents
+        )
+
+        chunks = [
+            Document(
+                page_content=_clean_chunk_text(
+                    chunk.page_content
+                ),
+                metadata=dict(
+                    chunk.metadata
+                ),
+            )
+            for chunk in chunks
+            if _clean_chunk_text(
+                chunk.page_content
+            )
+        ]
 
     if not chunks:
 
@@ -298,8 +568,32 @@ def _prepare_chunks(
             "No text chunks were created."
         )
 
-    return chunks
+    # -----------------------------------------
+    # Add sequential chunk indexes
+    # -----------------------------------------
 
+    final_chunks = []
+
+    for index, chunk in enumerate(
+        chunks
+    ):
+
+        metadata = dict(
+            chunk.metadata
+        )
+
+        metadata[
+            "chunk_index"
+        ] = index
+
+        final_chunks.append(
+            Document(
+                page_content=chunk.page_content,
+                metadata=metadata,
+            )
+        )
+
+    return final_chunks
 
 # ============================================================
 # INDEX FILE
@@ -310,11 +604,12 @@ def index_file(
     local_path: str,
     mime: str,
     folder_id: str | None = None,
+    original_filename: str | None = None,
 ) -> None:
 
     path = Path(local_path)
 
-    filename = path.name
+    filename = (original_filename if original_filename else path.name)
 
     print(
         f"\n[RAG] Indexing: {filename}"
@@ -669,6 +964,70 @@ def _get_documents(
 # ============================================================
 # BM25 SEARCH
 # ============================================================
+def _tokenize(text: str) -> list[str]:
+    """
+    Better BM25 tokenizer.
+
+    Converts:
+        "What are the objectives?"
+
+    into:
+        ["what", "are", "the", "objectives"]
+    """
+
+    return re.findall(
+        r"[a-zA-Z0-9]+",
+        text.lower(),
+    )
+
+
+def _expand_query(query: str) -> str:
+    """
+    Small query expansion layer.
+
+    Helps keyword retrieval handle common
+    variations such as:
+        objective / objectives
+        aim / aims
+        method / methods
+        result / results
+    """
+
+    query = query.strip()
+
+    expansions = {
+        "objective": "objectives aim aims goals",
+        "objectives": "objective aim aims goals",
+        "aim": "aims objective objectives goals",
+        "aims": "aim objective objectives goals",
+        "goal": "goals objective objectives aim aims",
+        "goals": "goal objective objectives aim aims",
+
+        "method": "methods methodology approach",
+        "methods": "method methodology approach",
+        "result": "results findings outcome",
+        "results": "result findings outcome",
+
+        "advantage": "advantages benefit benefits",
+        "advantages": "advantage benefit benefits",
+
+        "disadvantage": "disadvantages limitation limitations",
+        "disadvantages": "disadvantage limitation limitations",
+    }
+
+    tokens = _tokenize(query)
+
+    expanded = [query]
+
+    for token in tokens:
+
+        if token in expansions:
+            expanded.append(
+                expansions[token]
+            )
+
+    return " ".join(expanded)
+
 
 def _keyword_search(
     query: str,
@@ -680,9 +1039,7 @@ def _keyword_search(
         return []
 
     tokenized_documents = [
-        doc["text"]
-        .lower()
-        .split()
+        _tokenize(doc["text"])
         for doc in documents
     ]
 
@@ -690,10 +1047,12 @@ def _keyword_search(
         tokenized_documents
     )
 
-    query_tokens = (
+    expanded_query = _expand_query(
         query
-        .lower()
-        .split()
+    )
+
+    query_tokens = _tokenize(
+        expanded_query
     )
 
     scores = bm25.get_scores(
@@ -710,17 +1069,13 @@ def _keyword_search(
 
     for index in ranked_indices[:top_k]:
 
-        result = documents[
-            index
-        ].copy()
+        result = documents[index].copy()
 
         result["bm25_score"] = float(
             scores[index]
         )
 
-        results.append(
-            result
-        )
+        results.append(result)
 
     return results
 
@@ -728,24 +1083,109 @@ def _keyword_search(
 # ============================================================
 # HYBRID RETRIEVAL
 # ============================================================
+def _get_neighbor_chunks(
+    result: dict[str, Any],
+    all_documents: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """
+    Return the retrieved chunk plus its immediate
+    neighboring chunks from the same file.
 
+    Example:
+
+        chunk 10 ← previous
+        chunk 11 ← retrieved
+        chunk 12 ← next
+    """
+
+    metadata = result.get(
+        "metadata",
+        {},
+    ) or {}
+
+    file_id = metadata.get(
+        "file_id"
+    )
+
+    chunk_index = metadata.get(
+        "chunk_index"
+    )
+
+    if file_id is None or chunk_index is None:
+        return [result]
+
+    try:
+        chunk_index = int(
+            chunk_index
+        )
+    except (TypeError, ValueError):
+        return [result]
+
+    # -----------------------------------------
+    # Find neighboring chunks
+    # -----------------------------------------
+
+    neighbors = []
+
+    for document in all_documents:
+
+        document_metadata = document.get(
+            "metadata",
+            {},
+        ) or {}
+
+        if document_metadata.get(
+            "file_id"
+        ) != file_id:
+            continue
+
+        document_index = document_metadata.get(
+            "chunk_index"
+        )
+
+        try:
+            document_index = int(
+                document_index
+            )
+        except (TypeError, ValueError):
+            continue
+
+        if abs(
+            document_index - chunk_index
+        ) <= 1:
+
+            neighbors.append(
+                document
+            )
+
+    # -----------------------------------------
+    # Sort by original chunk position
+    # -----------------------------------------
+
+    neighbors.sort(
+        key=lambda document: int(
+            document.get(
+                "metadata",
+                {},
+            ).get(
+                "chunk_index",
+                0,
+            )
+        )
+    )
+
+    return neighbors
 def retrieve(
     query: str,
     folder_id: str | None = None,
     file_ids: list[str] | None = None,
     top_k: int = 8,
 ) -> list[dict[str, Any]]:
-    """
-    Hybrid retrieval:
 
-    Semantic search
-          +
-    BM25 keyword search
-          ↓
-    Reciprocal Rank Fusion
-          ↓
-    Top-K results
-    """
+    candidate_k = max(
+        top_k * 3,
+        20,
+    )
 
     # -----------------------------------------
     # Semantic search
@@ -755,11 +1195,11 @@ def retrieve(
         query=query,
         file_ids=file_ids,
         folder_id=folder_id,
-        top_k=top_k,
+        top_k=candidate_k,
     )
 
     # -----------------------------------------
-    # BM25 corpus
+    # BM25 search
     # -----------------------------------------
 
     documents = _get_documents(
@@ -770,20 +1210,18 @@ def retrieve(
     keyword_results = _keyword_search(
         query=query,
         documents=documents,
-        top_k=top_k,
+        top_k=candidate_k,
     )
 
     # -----------------------------------------
-    # Reciprocal Rank Fusion
+    # RRF
     # -----------------------------------------
 
     rrf_scores = {}
-
     result_data = {}
 
     rrf_k = 60
 
-    # Semantic ranking
     for rank, result in enumerate(
         semantic_results
     ):
@@ -795,19 +1233,15 @@ def retrieve(
                 doc_id,
                 0,
             )
-            + 1
-            / (
+            + 1 / (
                 rrf_k
                 + rank
                 + 1
             )
         )
 
-        result_data[
-            doc_id
-        ] = result
+        result_data[doc_id] = result
 
-    # Keyword ranking
     for rank, result in enumerate(
         keyword_results
     ):
@@ -819,8 +1253,7 @@ def retrieve(
                 doc_id,
                 0,
             )
-            + 1
-            / (
+            + 1 / (
                 rrf_k
                 + rank
                 + 1
@@ -834,13 +1267,9 @@ def retrieve(
                 {},
             )
 
-            result_data[
-                doc_id
-            ] = {
+            result_data[doc_id] = {
                 "id": doc_id,
-                "text": result[
-                    "text"
-                ],
+                "text": result["text"],
                 "file_name": metadata.get(
                     "filename",
                     "Unknown",
@@ -849,7 +1278,7 @@ def retrieve(
             }
 
     # -----------------------------------------
-    # Sort by RRF score
+    # RRF ranking
     # -----------------------------------------
 
     ranked = sorted(
@@ -859,45 +1288,196 @@ def retrieve(
     )
 
     # -----------------------------------------
-    # Final results
+    # Relevance reranking
+    # -----------------------------------------
+
+    query_tokens = set(
+        _tokenize(query)
+    )
+
+    reranked = []
+
+    for doc_id, rrf_score in ranked:
+
+        result = result_data[doc_id]
+
+        text = result.get(
+            "text",
+            "",
+        )
+
+        text_tokens = set(
+            _tokenize(text)
+        )
+
+        overlap = 0.0
+
+        if query_tokens and text_tokens:
+
+            overlap = (
+                len(
+                    query_tokens
+                    & text_tokens
+                )
+                / len(query_tokens)
+            )
+
+        fuzzy_score = partial_ratio(
+            query.lower(),
+            text.lower(),
+        ) / 100.0
+
+        final_score = (
+            (rrf_score * 0.65)
+            + (overlap * 0.20)
+            + (fuzzy_score * 0.15)
+        )
+
+        reranked.append(
+            (
+                doc_id,
+                final_score,
+            )
+        )
+
+    ranked = sorted(
+        reranked,
+        key=lambda item: item[1],
+        reverse=True,
+    )
+
+    # -----------------------------------------
+    # Build filtered results
     # -----------------------------------------
 
     final_results = []
 
-    for doc_id, score in ranked[
-        :top_k
-    ]:
+    for doc_id, score in ranked:
 
-        result = (
-            result_data[
-                doc_id
-            ].copy()
+        if len(final_results) >= top_k:
+            break
+
+        result = result_data[
+            doc_id
+        ].copy()
+
+        text = result.get(
+            "text",
+            "",
         )
 
-        result[
-            "hybrid_score"
-        ] = float(score)
+        # -------------------------------------
+        # Confidence filter
+        # -------------------------------------
+
+        if not _is_relevant_result(
+            score,
+            query,
+            text,
+        ):
+            continue
+
+        result["hybrid_score"] = float(
+            score
+        )
 
         metadata = result.get(
             "metadata",
             {},
+        ) or {}
+
+        result["file_id"] = metadata.get(
+            "file_id",
+            result.get("file_id"),
         )
 
-        # Convenient citation fields
-        if "page" in metadata:
+        result["file_name"] = metadata.get(
+            "filename",
+            result.get(
+                "file_name",
+                "Unknown",
+            ),
+        )
 
+        result["source_type"] = metadata.get(
+            "source_type",
+            result.get("source_type"),
+        )
+
+        if "page" in metadata:
             result["page"] = metadata[
                 "page"
             ]
 
         if "slide" in metadata:
-
             result["slide"] = metadata[
                 "slide"
             ]
+
+        result["metadata"] = metadata
+
+        # -------------------------------------
+        # Preserve original citation text
+        # -------------------------------------
+
+        result["retrieved_text"] = text
 
         final_results.append(
             result
         )
 
-    return final_results
+    # -----------------------------------------
+    # Context expansion
+    # -----------------------------------------
+
+    expanded_results = []
+
+    for result in final_results:
+
+        neighbors = _get_neighbor_chunks(
+            result,
+            documents,
+        )
+
+        result_copy = result.copy()
+
+        result_copy["retrieved_text"] = (
+            result.get(
+                "retrieved_text",
+                result.get(
+                    "text",
+                    "",
+                ),
+            )
+        )
+
+        context_parts = []
+
+        for neighbor in neighbors:
+
+            neighbor_text = neighbor.get(
+                "text",
+                "",
+            ).strip()
+
+            if neighbor_text:
+
+                context_parts.append(
+                    neighbor_text
+                )
+
+        result_copy["context_text"] = (
+            "\n\n".join(
+                context_parts
+            )
+        )
+
+        result_copy["context_chunks"] = len(
+            neighbors
+        )
+
+        expanded_results.append(
+            result_copy
+        )
+
+    return expanded_results
