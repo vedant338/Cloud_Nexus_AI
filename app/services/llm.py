@@ -63,6 +63,7 @@ def complete(
     message: str,
     mode: str,
     context_chunks: list[dict[str, Any]],
+    conversation_history: list[dict[str, Any]] | None = None,
 ) -> str:
 
     # -----------------------------------------------------
@@ -117,6 +118,39 @@ CONTENT:
     context = "\n\n".join(
         context_parts
     )
+        # -----------------------------------------------------
+    # CONVERSATION HISTORY
+    # -----------------------------------------------------
+
+    history_parts = []
+
+    if conversation_history:
+
+        for item in conversation_history:
+
+            role = item.get(
+                "role",
+                "user",
+            )
+
+            content = item.get(
+                "content",
+                "",
+            ).strip()
+
+            if not content:
+                continue
+
+            history_parts.append(
+                f"{role.upper()}: {content}"
+            )
+
+    conversation = "\n".join(
+        history_parts
+    )
+
+    if not conversation:
+        conversation = "(No previous conversation.)"
 
 
     # -----------------------------------------------------
@@ -139,11 +173,23 @@ Keep the answer easy to revise.
 """
 
     else:
-
         instruction = """
 Give a clear and complete explanation.
 
-Use:
+If the user asks to compare, contrast, differentiate,
+or find similarities/differences between two or more
+topics, documents, concepts, algorithms, or methods:
+
+- Identify each item being compared.
+- Use information from the relevant sources for each item.
+- Present the comparison in a clear table when appropriate.
+- Include similarities and differences when supported.
+- Do not add information that is not present in the sources.
+- If one item has information available but another does not,
+  clearly state that the information was not found in the
+  provided documents.
+
+For normal questions use:
 - short paragraphs
 - bullet points where useful
 - definitions when appropriate
@@ -151,9 +197,9 @@ Use:
 """
 
 
-    # -----------------------------------------------------
-    # STRICT GROUNDING PROMPT
-    # -----------------------------------------------------
+# -----------------------------------------------------
+# STRICT GROUNDING PROMPT
+# -----------------------------------------------------
 
     prompt = f"""
 You are Nexus AI, a document-grounded AI assistant.
@@ -166,6 +212,10 @@ the information contained in the supplied SOURCES.
 {context}
 
 ============== END SOURCES ==============
+
+================ PREVIOUS CONVERSATION ==========
+
+{conversation}
 
 ================ USER QUESTION ==========
 
@@ -231,6 +281,35 @@ provided documents."
 
 12. Never treat the user's question as information
     contained in the documents.
+
+13. Use the previous conversation only to understand
+    references such as "it", "this", "that", "the second
+    one", "above", or follow-up questions.
+
+14. The previous conversation is NOT a source of factual
+    information. Factual answers must still come from the
+    supplied document sources.
+
+15. If a follow-up question refers to something from the
+    previous conversation but the supplied documents do
+    not contain enough information to answer it, use the
+    insufficient-information response.
+
+16. For comparison questions, keep information associated
+    with the correct source or topic. Do not combine facts
+    from different documents incorrectly.
+
+17. When comparing multiple documents, concepts, algorithms,
+    or methods, explicitly distinguish which information
+    belongs to which item.
+
+18. Do not create comparison criteria from outside knowledge.
+    Only compare characteristics supported by the supplied
+    sources.
+
+19. If the sources provide information about only one side
+    of a requested comparison, do not invent the missing side.
+    State that the information for that side was not found.
 
 ================ FINAL ANSWER =================
 

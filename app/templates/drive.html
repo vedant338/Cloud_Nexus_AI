@@ -65,11 +65,49 @@
       </main>
 
       <aside class="ai-panel">
-        <header>
-          <h2>Nexus AI</h2>
-          <p id="ai-scope">Scope: My Drive</p>
+        <header class="ai-header">
+          <div class="ai-header-top">
+  <div>
+    <h2>Nexus AI</h2>
+    <p id="ai-scope">Scope: My Drive</p>
+  </div>
+
+<div class="chat-header-buttons">
+  <button
+    id="new-chat"
+    class="new-chat-btn"
+    type="button"
+  >
+    + New Chat
+  </button>
+  <button
+    id="chat-history-btn"
+    class="new-chat-btn"
+    type="button"
+  >
+    History
+  </button>
+</div>
+</div>
         </header>
         <div id="chat" class="chat"></div>
+        <div
+  id="chat-history-panel"
+  class="chat-history-panel hidden"
+>
+  <div class="chat-history-header">
+    <strong>Chat History</strong>
+
+    <button
+      id="close-chat-history"
+      type="button"
+    >
+      x
+    </button>
+  </div>
+
+  <div id="chat-history-list"></div>
+</div>
         <div class="ai-modes">
           <button type="button" data-mode="explain" class="chip active">Explain concept</button>
           <button type="button" data-mode="short_notes" class="chip">Short notes</button>

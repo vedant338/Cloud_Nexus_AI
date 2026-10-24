@@ -522,7 +522,112 @@
     loadPresentation();
 
 </script>
+<script>
+window.addEventListener(
+  "message",
+  (event) => {
 
+    if (
+      event.origin !== window.location.origin
+    ) {
+      return;
+    }
+
+    const data = event.data;
+
+    if (
+      !data ||
+      data.type !== "CLOUDNEXUS_PDF_ACTION"
+    ) {
+      return;
+    }
+
+    if (data.action !== "highlight") {
+      return;
+    }
+
+    const text =
+      String(data.text || "").trim();
+
+    if (!text) {
+      return;
+    }
+
+    highlightSelectedPDFText(text);
+  }
+);
+
+
+function highlightSelectedPDFText(text) {
+
+  const normalizedTarget =
+    text
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+
+  if (!normalizedTarget) {
+    return;
+  }
+
+  const textLayer =
+    document.querySelector(
+      ".textLayer"
+    );
+
+  if (!textLayer) {
+    console.warn(
+      "PDF text layer not available"
+    );
+    return;
+  }
+
+  const walker =
+    document.createTreeWalker(
+      textLayer,
+      NodeFilter.SHOW_TEXT
+    );
+
+  const nodes = [];
+
+  while (walker.nextNode()) {
+    nodes.push(
+      walker.currentNode
+    );
+  }
+
+  for (const node of nodes) {
+
+    const nodeText =
+      node.textContent
+        .replace(/\s+/g, " ")
+        .trim()
+        .toLowerCase();
+
+    if (
+      nodeText.includes(
+        normalizedTarget
+      )
+    ) {
+
+      const element =
+        node.parentElement;
+
+      if (element) {
+
+        element.style.backgroundColor =
+          "#fff59d";
+
+        element.style.borderRadius =
+          "3px";
+
+        element.style.padding =
+          "1px 2px";
+      }
+    }
+  }
+}
+</script>
 </body>
 
 </html>

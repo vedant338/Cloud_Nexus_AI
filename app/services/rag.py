@@ -22,9 +22,9 @@ Top-K relevant chunks
 
 import os
 import re
-import chromadb 
+import chromadb
 
-from rapidfuzz.fuzz import partial_ratio 
+from rapidfuzz.fuzz import partial_ratio
 from pathlib import Path
 from typing import Any
 
@@ -1345,12 +1345,24 @@ def retrieve(
         key=lambda item: item[1],
         reverse=True,
     )
-
-    # -----------------------------------------
+        # -----------------------------------------
     # Build filtered results
     # -----------------------------------------
 
     final_results = []
+
+    meaningful_query_tokens = (
+        set(_tokenize(query))
+        - {
+            "what", "are", "is", "the",
+            "a", "an", "of", "to",
+            "in", "on", "for", "and",
+            "or", "how", "why", "when",
+            "where", "which", "who",
+            "does", "do", "this", "that",
+            "these", "those",
+        }
+    )
 
     for doc_id, score in ranked:
 
@@ -1366,16 +1378,52 @@ def retrieve(
             "",
         )
 
+        text_tokens = set(
+            _tokenize(text)
+        )
+
         # -------------------------------------
-        # Confidence filter
+        # Exact keyword relevance
         # -------------------------------------
 
-        if not _is_relevant_result(
-            score,
-            query,
-            text,
-        ):
-            continue
+        exact_matches = (
+            meaningful_query_tokens
+            & text_tokens
+        )
+
+        exact_overlap = 0.0
+
+        if meaningful_query_tokens:
+            exact_overlap = (
+                len(exact_matches)
+                / len(meaningful_query_tokens)
+            )
+
+        # -------------------------------------
+        # Reject unrelated semantic matches
+        # -------------------------------------
+
+        if meaningful_query_tokens:
+
+            if len(
+                meaningful_query_tokens
+            ) <= 2:
+
+                if exact_overlap < 0.5:
+                    continue
+
+            elif exact_overlap == 0:
+                fuzzy_score = partial_ratio(
+                    query.lower(),
+                    text.lower(),
+                ) / 100.0
+
+                if fuzzy_score < 0.65:
+                    continue
+
+        # -------------------------------------
+        # Store score
+        # -------------------------------------
 
         result["hybrid_score"] = float(
             score
@@ -1417,7 +1465,7 @@ def retrieve(
         result["metadata"] = metadata
 
         # -------------------------------------
-        # Preserve original citation text
+        # Preserve citation text
         # -------------------------------------
 
         result["retrieved_text"] = text

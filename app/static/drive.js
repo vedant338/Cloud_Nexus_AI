@@ -511,7 +511,7 @@ function openPreview(item) {
     if (
         extension === "md" ||
         extension === "markdown"
-    ) { 
+    ) {
       openMarkdownViewer(item);
         return;
     }
@@ -537,7 +537,7 @@ function openPreview(item) {
         viewerUrl;
 
     return;
-} 
+}
    if (extension === "docx") {
 
     const viewerUrl =
@@ -550,7 +550,7 @@ function openPreview(item) {
     els.previewFrame.src = viewerUrl;
 
     return;
-} 
+}
 
 
     // ==========================================
@@ -1629,6 +1629,13 @@ document
 /* =========================================================
    CHAT SUBMIT
    ========================================================= */
+loadLatestConversation()
+  .catch((error) => {
+    console.error(
+      "Could not load conversation:",
+      error
+    );
+  });
 
 els.chatForm.addEventListener(
   "submit",
@@ -1684,6 +1691,8 @@ els.chatForm.addEventListener(
                 state.folderId,
               file_ids:
                 fileIds,
+              conversation_id:
+                currentConversationId,
             }),
           }
         );
@@ -1741,30 +1750,9 @@ const ACTION_STORAGE_KEY =
 const DEFAULT_AI_ACTIONS = [
 
   {
-    id: "highlight",
-
-    name: "Highlight",
-
-    icon: "🟡",
-
-    type: "local",
-
-    prompt: "",
-
-    enabled: true,
-
-    position: 0,
-
-    builtin: true,
-  },
-
-
-  {
     id: "short_notes",
 
     name: "Add to Short Notes",
-
-    icon: "📝",
 
     type: "llm",
 
@@ -1784,8 +1772,6 @@ const DEFAULT_AI_ACTIONS = [
 
     name: "Explain",
 
-    icon: "🤖",
-
     type: "llm",
 
     prompt:
@@ -1804,8 +1790,6 @@ const DEFAULT_AI_ACTIONS = [
 
     name: "Important for Nexus",
 
-    icon: "⭐",
-
     type: "important",
 
     prompt:
@@ -1823,8 +1807,6 @@ const DEFAULT_AI_ACTIONS = [
     id: "ask",
 
     name: "Ask Nexus",
-
-    icon: "❓",
 
     type: "llm",
 
@@ -1925,6 +1907,208 @@ let selectedActionText = "";
 let selectedPDFPage = null;
 let actionSelectionRange = null;
 let selectedPDFField = null;
+let currentConversationId = null;
+
+const chatHistoryBtn =
+  document.getElementById(
+    "chat-history-btn"
+  );
+
+const chatHistoryPanel =
+  document.getElementById(
+    "chat-history-panel"
+  );
+
+const chatHistoryList =
+  document.getElementById(
+    "chat-history-list"
+  );
+
+const closeChatHistory =
+  document.getElementById(
+    "close-chat-history"
+  );
+
+
+async function showChatHistory() {
+
+  const conversations =
+    await api(
+      "/api/chat/conversations"
+    );
+
+  chatHistoryList.innerHTML = "";
+
+  if (
+    !conversations ||
+    conversations.length === 0
+  ) {
+    chatHistoryList.innerHTML =
+      `<div class="chat-history-empty">
+        No conversations yet
+      </div>`;
+
+    return;
+  }
+
+  conversations.forEach(
+    (conversation) => {
+
+      const item =
+        document.createElement(
+          "div"
+        );
+
+      item.className =
+        "chat-history-item";
+
+      const title =
+        document.createElement(
+          "div"
+        );
+
+      title.className =
+        "chat-history-title";
+
+      title.textContent =
+        conversation.title ||
+        "New Chat";
+
+      const date =
+        document.createElement(
+          "div"
+        );
+
+      date.className =
+        "chat-history-date";
+
+      date.textContent =
+        new Date(
+          conversation.updated_at
+        ).toLocaleString();
+
+      item.appendChild(title);
+      item.appendChild(date);
+
+      item.addEventListener(
+        "click",
+        async () => {
+
+          await openConversation(
+            conversation.id
+          );
+
+          chatHistoryPanel.classList.add(
+            "hidden"
+          );
+        }
+      );
+
+      chatHistoryList.appendChild(
+        item
+      );
+    }
+  );
+}
+
+
+if (chatHistoryBtn) {
+
+  chatHistoryBtn.addEventListener(
+    "click",
+    async () => {
+
+      chatHistoryPanel.classList.toggle(
+        "hidden"
+      );
+
+      if (
+        !chatHistoryPanel.classList.contains(
+          "hidden"
+        )
+      ) {
+        await showChatHistory();
+      }
+    }
+  );
+}
+
+
+if (closeChatHistory) {
+
+  closeChatHistory.addEventListener(
+    "click",
+    () => {
+
+      chatHistoryPanel.classList.add(
+        "hidden"
+      );
+
+    }
+  );
+}
+
+const newChatBtn =
+  document.getElementById(
+    "new-chat"
+  );
+if (newChatBtn) {
+  newChatBtn.addEventListener(
+    "click",
+    () => {
+
+      currentConversationId = null;
+
+      const chat =
+        document.getElementById("chat");
+
+      if (chat) {
+        chat.innerHTML = "";
+      }
+
+      if (chatHistoryPanel) {
+        chatHistoryPanel.classList.add(
+          "hidden"
+        );
+      }
+    }
+  );
+}
+
+async function createNewConversation() {
+  const conversation = await api(
+    "/api/chat/conversations",
+    {
+      method: "POST",
+    }
+  );
+
+  currentConversationId =
+    conversation.id;
+
+  return conversation;
+}
+
+async function loadLatestConversation() {
+
+  const conversations =
+    await api(
+      "/api/chat/conversations"
+    );
+
+  if (
+    !conversations ||
+    conversations.length === 0
+  ) {
+    currentConversationId = null;
+    return null;
+  }
+
+  currentConversationId =
+    conversations[0].id;
+
+  return conversations[0];
+}
 
 function renderAIActionMenu() {
 
@@ -1976,16 +2160,7 @@ function renderAIActionMenu() {
       action.id;
 
 
-    button.innerHTML = `
-      <span class="ai-action-icon">
-        ${action.icon}
-      </span>
-
-      <span>
-        ${escapeHTML(action.name)}
-      </span>
-    `;
-
+    button.textContent = action.name || "Unnamed action";
 
     button.addEventListener(
       "click",
@@ -2058,6 +2233,28 @@ document.addEventListener(
     );
   }
 );
+window.addEventListener("message", (event) => {
+    if (event.origin !== window.location.origin) return;
+
+    const data = event.data;
+
+    if (data?.type !== "CLOUDNEXUS_PDF_SELECTION") return;
+
+    const text = data.text?.trim();
+    if (!text) return;
+
+    selectedActionText = text;
+    selectedPDFPage = data.page || null;
+    selectedPDFFileId = data.fileId || null;
+
+    const rect = els.previewFrame.getBoundingClientRect();
+
+    showAIActionMenu(
+        rect.left + 40,
+        rect.top + 80
+    );
+});
+
 window.addEventListener(
     "message",
     (event) => {
@@ -2749,16 +2946,6 @@ async function executeAIAction(action) {
 
   try {
     /* ==========================================
-       HIGHLIGHT
-       ========================================== */
-
-    if (action.id === "highlight") {
-      await highlightSelectedPDFText(text);
-      return;
-    }
-
-
-    /* ==========================================
        SHORT NOTES
        ========================================== */
        if (action.id === "short_notes") {
@@ -2827,7 +3014,7 @@ if (action.id === "ask") {
     ?.classList.add("hidden");
 
   return;
-} 
+}
 
     /* ==========================================
        CUSTOM ACTION
@@ -3141,7 +3328,9 @@ async function runPDFActionAI(instruction, text) {
             state.folderId,
 
           file_ids:
-            fileIds
+            fileIds,
+          conversation_id:
+            currentConversationId,
         })
       }
     );
@@ -3168,34 +3357,6 @@ async function runPDFActionAI(instruction, text) {
     );
   }
 }
-
-async function highlightSelectedPDFText(text) {
-
-  const iframe =
-    els.previewFrame;
-
-  if (!iframe?.contentWindow) {
-    console.warn("PDF viewer not available");
-    return;
-  }
-
-  iframe.contentWindow.postMessage(
-    {
-      type: "CLOUDNEXUS_PDF_ACTION",
-
-      action: "highlight",
-
-      text: text,
-
-      page: selectedPDFPage,
-
-      fileId: selectedPDFFileId
-    },
-
-    window.location.origin
-  );
-}
-
 
 function openMarkdownViewer(item) {
 

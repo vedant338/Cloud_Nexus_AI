@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import ChatMessage, File, Folder, new_id
+from app.models import (ChatMessage,Conversation, new_id, File, Folder, new_id)
 from app.services.rag import retrieve
 from app.services.llm import complete
 
@@ -30,8 +30,88 @@ class ChatIn(BaseModel):
 
     file_ids: list[str] = Field(
         default_factory=list
+        )
+    conversation_id: str | None = None
+
+
+# =========================================================
+# CONVERSATIONS
+# =========================================================
+
+@router.get("/conversations")
+def get_conversations(
+    db: Session = Depends(get_db),
+):
+
+    conversations = (
+        db.query(Conversation)
+        .order_by(
+            Conversation.updated_at.desc()
+        )
+        .all()
     )
 
+    return [
+        {
+            "id": conversation.id,
+            "title": conversation.title,
+            "created_at":
+                conversation.created_at.isoformat() + "Z",
+            "updated_at":
+                conversation.updated_at.isoformat() + "Z",
+        }
+        for conversation in conversations
+    ]
+
+
+@router.post("/conversations")
+def create_conversation(
+    db: Session = Depends(get_db),
+):
+
+    conversation = Conversation(
+        id=new_id(),
+        title="New Chat",
+    )
+
+    db.add(conversation)
+    db.commit()
+    db.refresh(conversation)
+
+    return {
+        "id": conversation.id,
+        "title": conversation.title,
+        "created_at":
+            conversation.created_at.isoformat() + "Z",
+        "updated_at":
+            conversation.updated_at.isoformat() + "Z",
+    }
+
+
+@router.delete("/conversations/{conversation_id}")
+def delete_conversation(
+    conversation_id: str,
+    db: Session = Depends(get_db),
+):
+
+    conversation = db.get(
+        Conversation,
+        conversation_id,
+    )
+
+    if not conversation:
+        return {
+            "ok": False,
+            "message": "Conversation not found",
+        }
+
+    db.delete(conversation)
+    db.commit()
+
+    return {
+        "ok": True,
+        "conversation_id": conversation_id,
+    }
 
 # =========================================================
 # CHAT HISTORY
@@ -74,11 +154,44 @@ def chat(
 ):
 
     # -----------------------------------------------------
+    # Get or create conversation
+    # -----------------------------------------------------
+
+    conversation = None
+
+    if body.conversation_id:
+
+        conversation = db.get(
+            Conversation,
+            body.conversation_id,
+        )
+
+    if not conversation:
+
+        conversation = Conversation(
+            id=new_id(),
+            title=body.message[:60],
+        )
+
+        db.add(conversation)
+        db.flush()
+
+
+    # -----------------------------------------------------
     # Save user message
     # -----------------------------------------------------
 
+    if (
+    conversation.title == "New Chat"
+    and body.message.strip()
+    ):
+        conversation.title = (
+        body.message.strip()[:60]
+    )
+
     user_msg = ChatMessage(
         id=new_id(),
+        conversation_id=conversation.id,
         role="user",
         content=body.message,
         mode=body.mode,
@@ -87,6 +200,9 @@ def chat(
 
     db.add(user_msg)
 
+    conversation.updated_at = __import__(
+        "datetime"
+    ).datetime.utcnow()
 
     # -----------------------------------------------------
     # Determine scope
@@ -186,6 +302,36 @@ def chat(
         for f in files
     ]
 
+    # =====================================================
+    # RECENT CONVERSATION HISTORY
+    # =====================================================
+
+    recent_messages = (
+        db.query(ChatMessage)
+        .filter(
+            ChatMessage.conversation_id ==
+            conversation.id
+        )
+        .order_by(
+            ChatMessage.created_at.desc()
+        )
+        .limit(6)
+        .all()
+    )
+
+    recent_messages.reverse()
+
+    conversation_history = []
+
+    for message in recent_messages:
+
+        conversation_history.append(
+            {
+                "role": message.role,
+                "content": message.content,
+            }
+        )
+
 
     # =====================================================
     # HYBRID RAG RETRIEVAL
@@ -266,10 +412,9 @@ def chat(
 
     answer = complete(
         message=body.message,
-
         mode=body.mode,
-
         context_chunks=context_chunks,
+        conversation_history=conversation_history,
     )
 
 
@@ -279,6 +424,7 @@ def chat(
 
     assistant = ChatMessage(
         id=new_id(),
+        conversation_id=conversation.id,
         role="assistant",
         content=answer,
         mode=body.mode,
@@ -289,26 +435,78 @@ def chat(
 
     db.commit()
 
-
     # =====================================================
-    # BUILD CITATIONS
+    # BUILD DEDUPLICATED CITATIONS
     # =====================================================
 
     citations = []
 
+    seen_sources = set()
 
-    for i, chunk in enumerate(
-        context_chunks[:5],
-        start=1,
-    ):
+    for chunk in context_chunks:
+
+        file_id = chunk.get(
+            "file_id"
+        )
+
+        page = chunk.get(
+            "page"
+        )
+
+        slide = chunk.get(
+            "slide"
+        )
+
+        # -------------------------------------------------
+        # Create a unique source key
+        # -------------------------------------------------
+
+        if page is not None:
+
+            source_key = (
+                file_id,
+                "page",
+                page,
+            )
+
+        elif slide is not None:
+
+            source_key = (
+                file_id,
+                "slide",
+                slide,
+            )
+
+        else:
+
+            source_key = (
+                file_id,
+                "document",
+            )
+
+
+        # -------------------------------------------------
+        # Skip duplicate source
+        # -------------------------------------------------
+
+        if source_key in seen_sources:
+            continue
+
+        seen_sources.add(
+            source_key
+        )
+
+
+        # -------------------------------------------------
+        # Add citation
+        # -------------------------------------------------
 
         citation = {
-            "rank": i,
+            "rank":
+                len(citations) + 1,
 
             "file_id":
-                chunk.get(
-                    "file_id"
-                ),
+                file_id,
 
             "file_name":
                 chunk.get(
@@ -327,14 +525,10 @@ def chat(
                 ),
 
             "page":
-                chunk.get(
-                    "page"
-                ),
+                page,
 
             "slide":
-                chunk.get(
-                    "slide"
-                ),
+                slide,
 
             "source_type":
                 chunk.get(
@@ -343,8 +537,11 @@ def chat(
 
             "text":
                 chunk.get(
-                    "text",
-                    "",
+                    "retrieved_text",
+                    chunk.get(
+                        "text",
+                        "",
+                    ),
                 ),
         }
 
@@ -352,6 +549,13 @@ def chat(
             citation
         )
 
+
+        # -------------------------------------------------
+        # Maximum 5 citations
+        # -------------------------------------------------
+
+        if len(citations) >= 5:
+            break
 
     # =====================================================
     # RESPONSE
