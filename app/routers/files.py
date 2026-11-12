@@ -1,8 +1,10 @@
 import tempfile
+import time
 from pathlib import Path
 
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends,
     File as UploadFileParam,
     Form,
@@ -13,7 +15,7 @@ from fastapi.responses import RedirectResponse, Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.db import get_db
+from app.db import get_db, SessionLocal
 from app.models import File, Folder, new_id
 from app.services.s3 import (
     upload_bytes,
@@ -29,6 +31,89 @@ router = APIRouter(
     tags=["files"],
 )
 
+MAX_UPLOAD_SIZE = 25 * 1024 * 1024  # 25 MB
+
+ALLOWED_EXTENSIONS = {
+    ".pdf",
+    ".docx",
+    ".pptx",
+    ".txt",
+    ".md",
+    ".markdown",
+}
+def _set_indexing_status(file_id: str, status: str) -> bool:
+    with SessionLocal() as db:
+        record = db.get(File, file_id)
+
+        if not record:
+            return False
+
+        record.indexing_status = status
+        db.commit()
+        return True
+
+
+def _index_file_background(
+    file_id: str,
+    data: bytes,
+    filename: str,
+    mime: str,
+    folder_id: str | None,
+):
+    temp_path = None
+
+    try:
+        # Stop if the file was deleted before indexing started.
+        if not _set_indexing_status(file_id, "processing"):
+            return
+
+        suffix = Path(filename).suffix
+
+        with tempfile.NamedTemporaryFile(
+            suffix=suffix,
+            delete=False,
+        ) as temp:
+            temp_path = temp.name
+            temp.write(data)
+
+        # Try indexing up to 3 times.
+        for attempt in range(3):
+            try:
+                index_file(
+                    file_id=file_id,
+                    local_path=temp_path,
+                    mime=mime,
+                    folder_id=folder_id,
+                    original_filename=filename,
+                )
+
+                _set_indexing_status(file_id, "completed")
+                print(f"Indexing completed: {filename}")
+                return
+
+            except Exception as e:
+                print(
+                    f"Indexing attempt {attempt + 1} failed "
+                    f"for {filename}: {e}"
+                )
+
+                if attempt < 2:
+                    time.sleep(2 ** attempt)
+
+        _set_indexing_status(file_id, "failed")
+        print(f"Indexing failed after 3 attempts: {filename}")
+
+    except Exception as e:
+        print(f"Background indexing error for {filename}: {e}")
+
+        try:
+            _set_indexing_status(file_id, "failed")
+        except Exception as status_error:
+            print(f"Could not update indexing status: {status_error}")
+
+    finally:
+        if temp_path:
+            Path(temp_path).unlink(missing_ok=True)
 
 # ============================================================
 # REQUEST MODELS
@@ -208,6 +293,7 @@ def _serialize(file: File) -> dict:
         "folder_id": file.folder_id,
         "mime": file.mime,
         "size_bytes": file.size_bytes,
+        "indexing_status": file.indexing_status,
         "created_at":
             file.created_at.isoformat() + "Z",
         "type": "file",
@@ -256,6 +342,7 @@ def list_files(
 
 @router.post("", status_code=201)
 async def upload_file(
+    background_tasks: BackgroundTasks,
     upload: UploadFile = UploadFileParam(...),
     folder_id: str | None = Form(default=None),
     db: Session = Depends(get_db),
@@ -281,20 +368,41 @@ async def upload_file(
     # -----------------------------------------
     # File information
     # -----------------------------------------
-
+    # File information and validation
     file_id = new_id()
+    filename = upload.filename or "untitled"
+    suffix = Path(filename).suffix.lower()
 
-    filename = (
-        upload.filename
-        or "untitled"
+    if suffix not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=415,
+            detail=f"Unsupported file type. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
     )
 
-    data = await upload.read()
+    # Read in chunks and enforce the 25 MB limit
+    chunks = []
+    total_size = 0
 
-    mime = (
-        upload.content_type
-        or "application/octet-stream"
-    )
+    while chunk := await upload.read(1024 * 1024):
+        total_size += len(chunk)
+
+        if total_size > MAX_UPLOAD_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail="File exceeds the maximum upload size of 25 MB",
+        )
+
+        chunks.append(chunk)
+
+    if total_size == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Uploaded file is empty",
+        )
+
+    data = b"".join(chunks)
+    mime = upload.content_type or "application/octet-stream"
+
 
 
     # -----------------------------------------
@@ -345,58 +453,18 @@ async def upload_file(
 
     db.refresh(record)
 
-
     # -----------------------------------------
-    # RAG indexing
+    # Schedule background RAG indexing
     # -----------------------------------------
 
-    indexed = False
-    index_error = None
-    temp_path = None
-
-    try:
-
-        suffix = Path(filename).suffix
-
-        with tempfile.NamedTemporaryFile(
-            suffix=suffix,
-            delete=False,
-        ) as temp:
-
-            temp_path = temp.name
-
-            temp.write(data)
-
-
-        index_file(
-            file_id=file_id,
-            local_path=temp_path,
-            mime=mime,
-            folder_id=folder_id,
-            original_filename=filename,
-        )
-
-
-        indexed = True
-
-
-    except Exception as e:
-
-        index_error = str(e)
-
-        print(
-            f"RAG indexing failed: {e}"
-        )
-
-
-    finally:
-
-        if temp_path:
-
-            Path(temp_path).unlink(
-                missing_ok=True
-            )
-
+    background_tasks.add_task(
+        _index_file_background,
+        file_id,
+        data,
+        filename,
+        mime,
+        folder_id,
+    )
 
     # -----------------------------------------
     # Return
@@ -405,13 +473,13 @@ async def upload_file(
     return {
         **_serialize(record),
 
-        "indexed": indexed,
+        "indexed": False,
 
         "storage": "s3",
 
         "s3_key": s3_key,
 
-        "index_error": index_error,
+        "index_error": None,
     }
 
 
@@ -425,6 +493,7 @@ async def upload_file(
 )
 async def create_short_note(
     body: ShortNoteIn,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
 
@@ -553,56 +622,19 @@ async def create_short_note(
     db.refresh(record)
 
 
+
     # -----------------------------------------
-    # RAG indexing
+    # Schedule background RAG indexing
     # -----------------------------------------
 
-    indexed = False
-    index_error = None
-    temp_path = None
-
-    try:
-
-        with tempfile.NamedTemporaryFile(
-            suffix=".md",
-            delete=False,
-        ) as temp:
-
-            temp_path = temp.name
-
-            temp.write(data)
-
-
-        index_file(
-            file_id=file_id,
-            local_path=temp_path,
-            mime=mime,
-            folder_id=body.folder_id,
-            original_filename=filename,
-        )
-
-
-        indexed = True
-
-
-    except Exception as e:
-
-        index_error = str(e)
-
-        print(
-            "Short note indexing failed:",
-            e,
-        )
-
-
-    finally:
-
-        if temp_path:
-
-            Path(temp_path).unlink(
-                missing_ok=True
-            )
-
+    background_tasks.add_task(
+        _index_file_background,
+        file_id,
+        data,
+        filename,
+        mime,
+        body.folder_id,
+    )
 
     # -----------------------------------------
     # Return
@@ -612,7 +644,7 @@ async def create_short_note(
 
         **_serialize(record),
 
-        "indexed": indexed,
+        "indexed": False,
 
         "storage": "s3",
 
@@ -622,7 +654,7 @@ async def create_short_note(
             body.source_file_id,
 
         "index_error":
-            index_error,
+            None,
     }
 
 
@@ -728,6 +760,7 @@ def preview_file(
 
         url = presign_get(
             file.stored_path,
+            content_type=file.mime ,
             expires_seconds=600,
         )
 

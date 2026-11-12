@@ -22,6 +22,7 @@ Top-K relevant chunks
 
 import os
 import re
+import threading
 import chromadb
 
 from rapidfuzz.fuzz import partial_ratio
@@ -75,7 +76,38 @@ collection = chroma_client.get_or_create_collection(
     name="cloudnexus_documents"
 )
 
+# ============================================================
+# BM25 CACHE
+# ============================================================
 
+_bm25_cache = {}
+_bm25_cache_lock = threading.Lock()
+
+def _invalidate_bm25_cache() -> None:
+    with _bm25_cache_lock:
+        _bm25_cache.clear()
+
+
+def _get_cached_bm25(
+    cache_key: tuple,
+    documents: list[dict[str, Any]],
+) -> BM25Okapi:
+    with _bm25_cache_lock:
+        if cache_key not in _bm25_cache:
+            tokenized_documents = [
+                _tokenize(doc["text"])
+                for doc in documents
+            ]
+            _bm25_cache[cache_key] = BM25Okapi(
+                tokenized_documents
+            )
+
+            # Keep cache size bounded.
+            if len(_bm25_cache) > 32:
+                oldest_key = next(iter(_bm25_cache))
+                del _bm25_cache[oldest_key]
+
+        return _bm25_cache[cache_key]
 # ============================================================
 # TEXT SPLITTER
 # ============================================================
@@ -374,111 +406,6 @@ def _chunk_pptx_documents(
 
     return chunks
 
-def _is_relevant_result(
-    score: float,
-    query: str,
-    text: str,
-) -> bool:
-    """
-    Reject clearly unrelated chunks.
-
-    A chunk is accepted when:
-    - it has meaningful keyword overlap, OR
-    - it has strong fuzzy similarity.
-
-    RRF score alone is NOT enough because RRF
-    always produces a ranking even for unrelated queries.
-    """
-
-    query_tokens = set(
-        _tokenize(query)
-    )
-
-    text_tokens = set(
-        _tokenize(text)
-    )
-
-    if not query_tokens or not text_tokens:
-        return False
-
-    # -----------------------------------------
-    # Remove generic question words
-    # -----------------------------------------
-
-    stop_words = {
-        "what",
-        "are",
-        "is",
-        "the",
-        "a",
-        "an",
-        "of",
-        "to",
-        "in",
-        "on",
-        "for",
-        "and",
-        "or",
-        "how",
-        "why",
-        "when",
-        "where",
-        "which",
-        "who",
-        "does",
-        "do",
-        "this",
-        "that",
-        "these",
-        "those",
-    }
-
-    meaningful_query_tokens = (
-        query_tokens - stop_words
-    )
-
-    if not meaningful_query_tokens:
-        return False
-
-    # -----------------------------------------
-    # Keyword overlap
-    # -----------------------------------------
-
-    overlap = (
-        len(
-            meaningful_query_tokens
-            & text_tokens
-        )
-        / len(
-            meaningful_query_tokens
-        )
-    )
-
-    # -----------------------------------------
-    # Fuzzy similarity
-    # -----------------------------------------
-
-    fuzzy_score = partial_ratio(
-        query.lower(),
-        text.lower(),
-    ) / 100.0
-
-    # -----------------------------------------
-    # Strong keyword match
-    # -----------------------------------------
-
-    if overlap >= 0.30:
-        return True
-
-    # -----------------------------------------
-    # Strong phrase similarity
-    # -----------------------------------------
-
-    if fuzzy_score >= 0.65:
-        return True
-
-    return False
-
 def _prepare_chunks(
     local_path: str,
 ) -> list[Document]:
@@ -742,7 +669,7 @@ def index_file(
         metadatas=metadatas,
         embeddings=vectors,
     )
-
+    _invalidate_bm25_cache()
     print(
         f"[RAG] Indexed {filename}: "
         f"{len(chunks)} chunks"
@@ -778,6 +705,7 @@ def delete_file_vectors(
             f"[RAG] Deleted {len(ids)} "
             f"vectors for {file_id}"
         )
+    _invalidate_bm25_cache()
 
 
 # ============================================================
@@ -791,30 +719,19 @@ def _semantic_search(
     top_k: int,
 ) -> list[dict[str, Any]]:
 
-    query_vector = embeddings.embed_query(
-        query
-    )
-
     # -----------------------------------------
     # Scope filter
     # -----------------------------------------
-
-    where = None
-
-    if file_ids:
-
-        where = {
-            "file_id": {
-                "$in": file_ids
-            }
+    # Fail closed: never search the entire collection.
+    if not file_ids:
+        return []
+    query_vector = embeddings.embed_query(query)
+    # Only search explicitly permitted file IDs.
+    where = {
+        "file_id": {
+            "$in": file_ids
         }
-
-    elif folder_id:
-
-        where = {
-            "folder_id": folder_id
-        }
-
+    }
     # -----------------------------------------
     # Chroma query
     # -----------------------------------------
@@ -898,22 +815,16 @@ def _get_documents(
     folder_id: str | None,
 ) -> list[dict[str, Any]]:
 
-    where = None
+    # Fail closed: an empty scope must return no documents.
+    if not file_ids:
+        return []
 
-    if file_ids:
-
-        where = {
-            "file_id": {
-                "$in": file_ids
-            }
+    # Only retrieve documents belonging to permitted files.
+    where = {
+        "file_id": {
+            "$in": file_ids
         }
-
-    elif folder_id:
-
-        where = {
-            "folder_id": folder_id
-        }
-
+    }
     kwargs = {
         "include": [
             "documents",
@@ -1038,13 +949,19 @@ def _keyword_search(
     if not documents:
         return []
 
-    tokenized_documents = [
-        _tokenize(doc["text"])
-        for doc in documents
-    ]
+    # Keep document order stable for cached BM25 scores.
+    documents = sorted(
+        documents,
+        key=lambda doc: doc["id"],
+    )
 
-    bm25 = BM25Okapi(
-        tokenized_documents
+    cache_key = tuple(
+        doc["id"] for doc in documents
+    )
+
+    bm25 = _get_cached_bm25(
+        cache_key,
+        documents,
     )
 
     expanded_query = _expand_query(
@@ -1181,6 +1098,10 @@ def retrieve(
     file_ids: list[str] | None = None,
     top_k: int = 8,
 ) -> list[dict[str, Any]]:
+    # Never perform global retrieval when scope is empty.
+    if not file_ids:
+        print("[RAG] Empty file scope. Returning no results.")
+        return []
 
     candidate_k = max(
         top_k * 3,
@@ -1296,8 +1217,14 @@ def retrieve(
     )
 
     reranked = []
+    max_rrf_score = 2.0 / (rrf_k + 1)
 
     for doc_id, rrf_score in ranked:
+
+        normalized_rrf_score = min(
+            rrf_score / max_rrf_score,
+            1.0,
+        )
 
         result = result_data[doc_id]
 
@@ -1328,7 +1255,7 @@ def retrieve(
         ) / 100.0
 
         final_score = (
-            (rrf_score * 0.65)
+            (normalized_rrf_score * 0.65)
             + (overlap * 0.20)
             + (fuzzy_score * 0.15)
         )
@@ -1345,7 +1272,8 @@ def retrieve(
         key=lambda item: item[1],
         reverse=True,
     )
-        # -----------------------------------------
+
+    # -----------------------------------------
     # Build filtered results
     # -----------------------------------------
 
@@ -1360,7 +1288,7 @@ def retrieve(
             "or", "how", "why", "when",
             "where", "which", "who",
             "does", "do", "this", "that",
-            "these", "those",
+            "these", "those", "its",
         }
     )
 
@@ -1398,29 +1326,44 @@ def retrieve(
                 len(exact_matches)
                 / len(meaningful_query_tokens)
             )
-
+        metadata = result.get("metadata", {}) or {}
+        print(
+    "[RAG FILTER]",
+    "page =", metadata.get("page"),
+    "matches =", sorted(exact_matches),
+    "query_tokens =", sorted(meaningful_query_tokens),
+    "overlap =", exact_overlap,
+)
+                # -------------------------------------
+        # Accept keyword matches OR strong semantic matches
         # -------------------------------------
-        # Reject unrelated semantic matches
-        # -------------------------------------
 
-        if meaningful_query_tokens:
+        semantic_distance = result.get("distance")
 
-            if len(
-                meaningful_query_tokens
-            ) <= 2:
+        semantic_match = (
+            semantic_distance is not None
+            and semantic_distance <= 0.65
+        )
 
-                if exact_overlap < 0.5:
-                    continue
+        keyword_match = (
+            exact_overlap >= (
+                0.50
+                if len(meaningful_query_tokens) <= 2
+                else 0.30
+            )
+        )
 
-            elif exact_overlap == 0:
-                fuzzy_score = partial_ratio(
-                    query.lower(),
-                    text.lower(),
-                ) / 100.0
+        print(
+            "[RAG RELEVANCE]",
+            "semantic_distance =", semantic_distance,
+            "semantic_match =", semantic_match,
+            "keyword_match =", keyword_match,
+        )
 
-                if fuzzy_score < 0.65:
-                    continue
-
+        if meaningful_query_tokens and not (
+            keyword_match or semantic_match
+        ):
+            continue
         # -------------------------------------
         # Store score
         # -------------------------------------

@@ -7,6 +7,9 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import File, Folder, new_id
 
+from app.services.s3 import delete_object
+from app.services.rag import delete_file_vectors
+
 router = APIRouter(prefix="/api/folders", tags=["folders"])
 
 
@@ -94,33 +97,81 @@ def rename_folder(folder_id: str, body: FolderIn, db: Session = Depends(get_db))
 
 
 def _delete_folder_tree(db: Session, folder: Folder) -> None:
-    children = db.query(Folder).filter(Folder.parent_id == folder.id).all()
-    for child in children:
-        _delete_folder_tree(db, child)
-    files = db.query(File).filter(File.folder_id == folder.id).all()
+    # Collect the selected folder and all descendants.
+    all_folders = db.query(Folder).all()
+
+    children_by_parent = {}
+    for item in all_folders:
+        children_by_parent.setdefault(item.parent_id, []).append(item)
+
+    folders_to_delete = []
+    stack = [folder]
+    visited = set()
+
+    while stack:
+        current = stack.pop()
+
+        if current.id in visited:
+            continue
+
+        visited.add(current.id)
+        folders_to_delete.append(current)
+
+        stack.extend(children_by_parent.get(current.id, []))
+
+    folder_ids = [item.id for item in folders_to_delete]
+
+    # Collect all files belonging to these folders.
+    files = (
+        db.query(File)
+        .filter(File.folder_id.in_(folder_ids))
+        .all()
+    )
+
+    # Clean up external storage before deleting database records.
     for file in files:
-        _remove_stored(file)
-        db.delete(file)
-    db.delete(folder)
+        try:
+            if file.stored_path:
+                delete_object(file.stored_path)
 
+            delete_file_vectors(file.id)
 
-def _remove_stored(file: File) -> None:
-    from pathlib import Path
-    import shutil
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Could not clean up file '{file.name}': {str(e)}",
+            )
 
-    path = Path(file.stored_path)
-    parent = path.parent
-    if path.exists():
-        path.unlink()
-    if parent.exists() and parent.is_dir() and not any(parent.iterdir()):
-        shutil.rmtree(parent, ignore_errors=True)
+    # Delete database records after external cleanup succeeds.
+    try:
+        for file in files:
+            db.delete(file)
+
+        # Delete child folders before their parents.
+        for item in reversed(folders_to_delete):
+            db.delete(item)
+
+        db.commit()
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not delete folder records: {str(e)}",
+        )
 
 
 @router.delete("/{folder_id}")
 def delete_folder(folder_id: str, db: Session = Depends(get_db)):
     folder = db.get(Folder, folder_id)
+
     if not folder:
         raise HTTPException(404, "Folder not found")
+
     _delete_folder_tree(db, folder)
-    db.commit()
-    return {"ok": True}
+
+    return {
+        "ok": True,
+        "message": "Folder and its contents deleted successfully",
+    }

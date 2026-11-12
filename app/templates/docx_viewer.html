@@ -458,82 +458,6 @@
 
         <div id="docx-container"></div>
 
-<script>
-async function loadDocx() {
-    const fileId = "{{ file_id }}";
-
-    const response = await fetch(
-        `/api/files/${fileId}/content`,
-        {
-            credentials: "same-origin"
-        }
-    );
-
-    if (!response.ok) {
-        throw new Error(
-            `DOCX download failed: ${response.status}`
-        );
-    }
-
-    const arrayBuffer =
-        await response.arrayBuffer();
-
-    console.log(
-        "DOCX downloaded:",
-        arrayBuffer.byteLength,
-        "bytes"
-    );
-
-    const container =
-        document.getElementById("docx-container");
-
-    container.innerHTML = "";
-
-    await docx.renderAsync(
-        arrayBuffer,
-        container,
-        null,
-        {
-            className: "cloudnexus-docx",
-            inWrapper: true,
-            breakPages: true,
-            ignoreWidth: false,
-            ignoreHeight: false,
-            ignoreFonts: false
-        }
-    );
-
-    console.log("DOCX rendered successfully");
-}
-
-loadDocx().catch(error => {
-    console.error(
-        "DOCX rendering failed:",
-        error
-    );
-
-    document.getElementById(
-        "docx-container"
-    ).innerHTML = `
-        <div style="
-            padding:40px;
-            color:#b91c1c;
-            background:#fff;
-            border:1px solid #fecaca;
-            border-radius:12px;
-        ">
-            <h2>Could not render Word document</h2>
-            <p>${error.message}</p>
-        </div>
-    `;
-});
-</script>
-
-            <div class="loading">
-                Loading Word document...
-            </div>
-
-        </div>
 
     </main>
 
@@ -542,7 +466,6 @@ loadDocx().catch(error => {
          DOCX PREVIEW LIBRARY
     ========================================= -->
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/docx-preview@0.4.1/dist/docx-preview.min.js"></script>
     <script src="/static/docx/docx-preview.min.js"></script>
     <script>
 
@@ -606,7 +529,7 @@ loadDocx().catch(error => {
 
 
                 container.innerHTML = "";
-                
+
 
                 await docx.renderAsync(
                     buffer,

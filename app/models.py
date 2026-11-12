@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
@@ -36,6 +36,7 @@ class File(Base):
     stored_path: Mapped[str] = mapped_column(String(1024))
     mime: Mapped[str] = mapped_column(String(128), default="application/octet-stream")
     size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    indexing_status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     folder = relationship("Folder", back_populates="files")
@@ -77,6 +78,7 @@ class ChatMessage(Base):
     conversation_id: Mapped[str] = mapped_column(String(36),ForeignKey("conversations.id"),)
     role: Mapped[str] = mapped_column(String(16))
     content: Mapped[str] = mapped_column(Text)
+    citations: Mapped[list | None] = mapped_column(JSON, nullable=True, default=list)
     mode: Mapped[str | None] = mapped_column(String(32), nullable=True)
     folder_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

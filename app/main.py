@@ -17,6 +17,32 @@ from docx import Document
 
 import tempfile
 import markdown
+import nh3
+
+ALLOWED_MARKDOWN_TAGS = {
+    "a", "abbr", "b", "blockquote", "br", "caption",
+    "code", "col", "colgroup", "dd", "del", "div", "dl",
+    "dt", "em", "h1", "h2", "h3", "h4", "h5", "h6",
+    "hr", "i", "img", "li", "ol", "p", "pre", "s",
+    "span", "strong", "sub", "sup", "table", "tbody",
+    "td", "tfoot", "th", "thead", "tr", "u", "ul",
+}
+
+ALLOWED_MARKDOWN_ATTRIBUTES = {
+    "a": {"href", "title"},
+    "img": {"src", "alt", "title", "width", "height"},
+    "code": {"class"},
+    "pre": {"class"},
+    "h1": {"id"},
+    "h2": {"id"},
+    "h3": {"id"},
+    "h4": {"id"},
+    "h5": {"id"},
+    "h6": {"id"},
+    "td": {"align", "colspan", "rowspan"},
+    "th": {"align", "colspan", "rowspan"},
+}
+
 # --------------------------------------------------
 # Paths
 # --------------------------------------------------
@@ -155,7 +181,20 @@ def markdown_viewer(
         ).read_text(
             encoding="utf-8"
         )
-        markdown_html = markdown.markdown(markdown_text,extensions=['fenced_code', 'tables','extra','toc'],)
+        markdown_html = markdown.markdown(
+        markdown_text,
+        extensions=["fenced_code", "tables", "extra", "toc"],
+    )
+
+        # Remove unsafe HTML while preserving supported Markdown formatting.
+        markdown_html = nh3.clean(
+        markdown_html,
+        tags=ALLOWED_MARKDOWN_TAGS,
+        attributes=ALLOWED_MARKDOWN_ATTRIBUTES,
+        url_schemes={"http", "https", "mailto"},
+        strip_comments=True,
+        link_rel="noopener noreferrer",
+         )
         print(
             f"Markdown loaded: {file.name}"
         )

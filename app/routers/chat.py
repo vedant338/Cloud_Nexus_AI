@@ -1,11 +1,12 @@
+import re
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import (ChatMessage,Conversation, new_id, File, Folder, new_id)
+from app.models import (ChatMessage,Conversation, new_id, File, Folder)
 from app.services.rag import retrieve
-from app.services.llm import complete
+from app.services.llm import complete, resolve_followup_query
 
 
 router = APIRouter(
@@ -32,6 +33,44 @@ class ChatIn(BaseModel):
         default_factory=list
         )
     conversation_id: str | None = None
+
+def get_descendant_folder_ids(
+    db: Session,
+    root_folder_id: str,
+) -> list[str]:
+
+    folders = db.query(
+        Folder.id,
+        Folder.parent_id,
+    ).all()
+
+    children_by_parent = {}
+
+    for folder_id, parent_id in folders:
+        children_by_parent.setdefault(
+            parent_id, []
+        ).append(folder_id)
+
+    result = []
+    stack = [root_folder_id]
+    visited = set()
+
+    while stack:
+        current_id = stack.pop()
+
+        if current_id in visited:
+            continue
+
+        visited.add(current_id)
+        result.append(current_id)
+
+        stack.extend(
+            children_by_parent.get(
+                current_id, []
+            )
+        )
+
+    return result
 
 
 # =========================================================
@@ -133,8 +172,10 @@ def history(
     return [
         {
             "id": r.id,
+            "conversation_id": r.conversation_id,
             "role": r.role,
             "content": r.content,
+            "citations": r.citations or [],
             "mode": r.mode,
             "created_at":
                 r.created_at.isoformat() + "Z",
@@ -153,9 +194,9 @@ def chat(
     db: Session = Depends(get_db),
 ):
 
-    # -----------------------------------------------------
-    # Get or create conversation
-    # -----------------------------------------------------
+# -----------------------------------------------------
+# Get or create conversation
+# -----------------------------------------------------
 
     conversation = None
 
@@ -205,13 +246,11 @@ def chat(
     ).datetime.utcnow()
 
     # -----------------------------------------------------
-    # Determine scope
+    # Determine retrieval scope
     # -----------------------------------------------------
 
     names: list[str] = []
-
     files: list[File] = []
-
 
     # -----------------------------------------------------
     # Explicit file selection
@@ -232,9 +271,8 @@ def chat(
             for f in files
         ]
 
-
     # -----------------------------------------------------
-    # Folder selection
+    # Folder selection: include all descendants
     # -----------------------------------------------------
 
     elif body.folder_id:
@@ -244,44 +282,42 @@ def chat(
             body.folder_id,
         )
 
-        folder_name = (
-            folder.name
-            if folder
-            else "this folder"
-        )
+        if folder:
 
-        files = (
-            db.query(File)
-            .filter(
-                File.folder_id ==
-                body.folder_id
+            folder_ids = get_descendant_folder_ids(
+                db,
+                body.folder_id,
             )
-            .all()
-        )
 
-        names = [
-            f.name
-            for f in files
-        ]
-
-        if not names:
+            files = (
+                db.query(File)
+                .filter(
+                    File.folder_id.in_(folder_ids)
+                )
+                .all()
+            )
 
             names = [
-                f"(empty) {folder_name}"
+                f.name
+                for f in files
             ]
 
+            if not names:
+                names = [
+                    f"(empty) {folder.name}"
+                ]
+
+        else:
+            names = ["(folder not found)"]
 
     # -----------------------------------------------------
-    # My Drive / root
+    # My Drive: include all files
     # -----------------------------------------------------
 
     else:
 
         files = (
             db.query(File)
-            .filter(
-                File.folder_id.is_(None)
-            )
             .all()
         )
 
@@ -291,11 +327,13 @@ def chat(
         ]
 
         if not names:
-
             names = [
                 "My Drive (no files yet)"
             ]
 
+    # -----------------------------------------------------
+    # Authoritative retrieval scope
+    # -----------------------------------------------------
 
     file_ids = [
         f.id
@@ -309,8 +347,8 @@ def chat(
     recent_messages = (
         db.query(ChatMessage)
         .filter(
-            ChatMessage.conversation_id ==
-            conversation.id
+            ChatMessage.conversation_id ==  conversation.id,
+            ChatMessage.id != user_msg.id,
         )
         .order_by(
             ChatMessage.created_at.desc()
@@ -337,13 +375,21 @@ def chat(
     # HYBRID RAG RETRIEVAL
     # =====================================================
 
+    # Resolve follow-up references before document retrieval.
+    retrieval_query = resolve_followup_query(
+    question=body.message,
+    conversation_history=conversation_history,
+    )
+
+    print("[QUERY REWRITE]")
+    print("Original:", body.message)
+    print("Resolved:", retrieval_query)
+
+
     context_chunks = retrieve(
-        query=body.message,
-
+        query=retrieval_query,
         folder_id=body.folder_id,
-
         file_ids=file_ids,
-
         top_k=8,
     )
 
@@ -399,7 +445,8 @@ def chat(
             "Score:",
             chunk.get("hybrid_score")
         )
-
+        print("ORIGINAL RETRIEVED TEXT:")
+        print(chunk.get("retrieved_text", "")[:500])
 
     print(
         "\n====================================\n"
@@ -433,129 +480,54 @@ def chat(
 
     db.add(assistant)
 
-    db.commit()
+    # =====================================================
+    # BUILD CITATIONS REFERENCED BY THE ANSWER
+    # =====================================================
 
-    # =====================================================
-    # BUILD DEDUPLICATED CITATIONS
-    # =====================================================
+    normalized_answer = " ".join(answer.split()).strip().lower()
+
+    refusal = (
+        "i couldn't find enough information about this "
+        "in the provided documents."
+    )
+
+    cited_ranks = {
+        int(number)
+        for number in re.findall(r"\[(\d+)\]", answer)
+    }
 
     citations = []
 
-    seen_sources = set()
+    if normalized_answer != refusal:
+        for rank, chunk in enumerate(context_chunks, start=1):
 
-    for chunk in context_chunks:
+            # Match the source-text selection used in llm.py.
+            source_text = (
+                chunk.get("retrieved_text")
+                or chunk.get("context_text")
+                or chunk.get("text")
+                or ""
+            ).strip()
 
-        file_id = chunk.get(
-            "file_id"
-        )
+            if not source_text or rank not in cited_ranks:
+                continue
 
-        page = chunk.get(
-            "page"
-        )
+            citation = {
+                "rank": rank,
+                "file_id": chunk.get("file_id"),
+                "file_name": chunk.get("file_name", "Unknown"),
+                "score": chunk.get("hybrid_score"),
+                "distance": chunk.get("distance"),
+                "page": chunk.get("page"),
+                "slide": chunk.get("slide"),
+                "source_type": chunk.get("source_type"),
+                "text": source_text,
+            }
 
-        slide = chunk.get(
-            "slide"
-        )
+            citations.append(citation)
 
-        # -------------------------------------------------
-        # Create a unique source key
-        # -------------------------------------------------
-
-        if page is not None:
-
-            source_key = (
-                file_id,
-                "page",
-                page,
-            )
-
-        elif slide is not None:
-
-            source_key = (
-                file_id,
-                "slide",
-                slide,
-            )
-
-        else:
-
-            source_key = (
-                file_id,
-                "document",
-            )
-
-
-        # -------------------------------------------------
-        # Skip duplicate source
-        # -------------------------------------------------
-
-        if source_key in seen_sources:
-            continue
-
-        seen_sources.add(
-            source_key
-        )
-
-
-        # -------------------------------------------------
-        # Add citation
-        # -------------------------------------------------
-
-        citation = {
-            "rank":
-                len(citations) + 1,
-
-            "file_id":
-                file_id,
-
-            "file_name":
-                chunk.get(
-                    "file_name",
-                    "Unknown",
-                ),
-
-            "score":
-                chunk.get(
-                    "hybrid_score"
-                ),
-
-            "distance":
-                chunk.get(
-                    "distance"
-                ),
-
-            "page":
-                page,
-
-            "slide":
-                slide,
-
-            "source_type":
-                chunk.get(
-                    "source_type"
-                ),
-
-            "text":
-                chunk.get(
-                    "retrieved_text",
-                    chunk.get(
-                        "text",
-                        "",
-                    ),
-                ),
-        }
-
-        citations.append(
-            citation
-        )
-
-
-        # -------------------------------------------------
-        # Maximum 5 citations
-        # -------------------------------------------------
-
-        if len(citations) >= 5:
-            break
+    assistant.citations = citations
+    db.commit()
 
     # =====================================================
     # RESPONSE

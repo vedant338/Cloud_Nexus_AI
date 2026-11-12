@@ -46,20 +46,19 @@ def upload_bytes(
 
 def presign_get(
     key: str,
+    content_type: str,
     expires_seconds: int = 600,
 ) -> str:
-
     return s3.generate_presigned_url(
         "get_object",
         Params={
             "Bucket": S3_BUCKET_NAME,
             "Key": key,
             "ResponseContentDisposition": "inline",
-            "ResponseContentType": "application/pdf",
+            "ResponseContentType": content_type,
         },
         ExpiresIn=expires_seconds,
     )
-
 
 def delete_object(key: str) -> None:
 

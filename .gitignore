@@ -9,3 +9,18 @@ uploads/
 
 # Local vector database
 chroma_db/
+tmp/LaRA-upstream/
+
+# Local backups
+*.backup
+*.before_relevance_fix
+*.task*
+*_backup.txt
+backend_dump.txt
+
+# Benchmark and temporary files
+tmp/
+chroma_filename_backup_*.json
+
+# Editor settings
+.vscode/

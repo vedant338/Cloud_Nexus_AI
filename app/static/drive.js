@@ -1630,6 +1630,11 @@ document
    CHAT SUBMIT
    ========================================================= */
 loadLatestConversation()
+  .then((conversation) => {
+    if (conversation) {
+      return openConversation(conversation.id);
+    }
+  })
   .catch((error) => {
     console.error(
       "Could not load conversation:",
@@ -1727,16 +1732,7 @@ els.chatForm.addEventListener(
    CHAT HISTORY
    ========================================================= */
 
-api("/api/chat/history")
-  .then((rows) => {
-
-    rows.forEach((r) =>
-      addBubble(
-        r.role,
-        r.content
-      )
-    );
-  });
+// Conversation messages are loaded by openConversation().
 
 
 /* =========================================================
@@ -2108,6 +2104,30 @@ async function loadLatestConversation() {
     conversations[0].id;
 
   return conversations[0];
+}
+
+
+async function openConversation(conversationId) {
+  currentConversationId = conversationId;
+
+  const rows = await api("/api/chat/history");
+
+  const messages = rows.filter(
+    (row) => String(row.conversation_id) === String(conversationId)
+  );
+
+  els.chat.innerHTML = "";
+
+  messages.forEach((row) => {
+    if (row.role === "assistant") {
+      addAssistantBubble(
+        row.content,
+        row.citations || []
+      );
+    } else {
+      addBubble(row.role, row.content);
+    }
+  });
 }
 
 function renderAIActionMenu() {
@@ -3261,9 +3281,7 @@ async function createShortNote(text) {
 
       ` ${note.name}\n` +
 
-      ` ${note.indexed
-        ? "Indexed into Nexus"
-        : "Created but indexing failed"}`
+      ` Indexing started in the background.`
     );
 
 
