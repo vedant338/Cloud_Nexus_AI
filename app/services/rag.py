@@ -20,6 +20,7 @@ Reciprocal Rank Fusion (RRF)
 Top-K relevant chunks
 """
 
+import logging
 import os
 import re
 import threading
@@ -36,6 +37,8 @@ from langchain_core.documents import Document
 from langchain_community.document_loaders import (PyPDFLoader,Docx2txtLoader,TextLoader,)
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -538,9 +541,7 @@ def index_file(
 
     filename = (original_filename if original_filename else path.name)
 
-    print(
-        f"\n[RAG] Indexing: {filename}"
-    )
+    logger.info("Indexing: %s", filename)
 
     # -----------------------------------------
     # Prepare chunks
@@ -550,9 +551,7 @@ def index_file(
         local_path
     )
 
-    print(
-        f"[RAG] Extracted {len(chunks)} chunks"
-    )
+    logger.info("Extracted %d chunks", len(chunks))
 
     # -----------------------------------------
     # Delete old vectors
@@ -575,9 +574,7 @@ def index_file(
     # Batch embeddings
     # -----------------------------------------
 
-    print(
-        "[RAG] Generating embeddings..."
-    )
+    logger.info("Generating embeddings")
 
     vectors = embeddings.embed_documents(
         texts
@@ -670,10 +667,7 @@ def index_file(
         embeddings=vectors,
     )
     _invalidate_bm25_cache()
-    print(
-        f"[RAG] Indexed {filename}: "
-        f"{len(chunks)} chunks"
-    )
+    logger.info("Indexed %s: %d chunks", filename, len(chunks))
 
 
 # ============================================================
@@ -701,10 +695,7 @@ def delete_file_vectors(
             ids=ids
         )
 
-        print(
-            f"[RAG] Deleted {len(ids)} "
-            f"vectors for {file_id}"
-        )
+        logger.info("Deleted %d vectors for %s", len(ids), file_id)
     _invalidate_bm25_cache()
 
 
@@ -1100,7 +1091,7 @@ def retrieve(
 ) -> list[dict[str, Any]]:
     # Never perform global retrieval when scope is empty.
     if not file_ids:
-        print("[RAG] Empty file scope. Returning no results.")
+        logger.debug("Empty file scope; returning no results")
         return []
 
     candidate_k = max(
@@ -1327,13 +1318,13 @@ def retrieve(
                 / len(meaningful_query_tokens)
             )
         metadata = result.get("metadata", {}) or {}
-        print(
-    "[RAG FILTER]",
-    "page =", metadata.get("page"),
-    "matches =", sorted(exact_matches),
-    "query_tokens =", sorted(meaningful_query_tokens),
-    "overlap =", exact_overlap,
-)
+        logger.debug(
+            "RAG filter: page=%s matches=%s query_tokens=%s overlap=%s",
+            metadata.get("page"),
+            sorted(exact_matches),
+            sorted(meaningful_query_tokens),
+            exact_overlap,
+        )
                 # -------------------------------------
         # Accept keyword matches OR strong semantic matches
         # -------------------------------------
@@ -1353,11 +1344,11 @@ def retrieve(
             )
         )
 
-        print(
-            "[RAG RELEVANCE]",
-            "semantic_distance =", semantic_distance,
-            "semantic_match =", semantic_match,
-            "keyword_match =", keyword_match,
+        logger.debug(
+            "RAG relevance: semantic_distance=%s semantic_match=%s keyword_match=%s",
+            semantic_distance,
+            semantic_match,
+            keyword_match,
         )
 
         if meaningful_query_tokens and not (

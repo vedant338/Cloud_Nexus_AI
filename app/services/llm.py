@@ -7,11 +7,12 @@ The LLM is strictly grounded in the retrieved
 document chunks supplied by the RAG pipeline.
 """
 
+import logging
 from typing import Any
-
-from click import prompt
 from langchain_ollama import ChatOllama
 from app.config import OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_NUM_CTX
+
+logger = logging.getLogger(__name__)
 
 # =========================================================
 # LLM
@@ -92,7 +93,7 @@ STANDALONE SEARCH QUERY:
         return rewritten if rewritten else question
 
     except Exception as e:
-        print(f"[QUERY REWRITE] Failed: {e}")
+        logger.exception("Query rewrite failed")
         return question
 
 
@@ -463,26 +464,5 @@ provided documents."
 
 Answer the user now.
 """
-    print("\n========== DEBUG: LLM CONTEXT ==========")
-
-    for i, chunk in enumerate(context_chunks, start=1):
-        print(f"\nSOURCE {i}")
-        print("FILE:", chunk.get("file_name"))
-        print("PAGE:", chunk.get("page"))
-        print("CONTEXT:")
-        print(
-        chunk.get("context_text")
-        or chunk.get("retrieved_text")
-        or chunk.get("text")
-        or ""
-    )
-
-    print("\n========== END DEBUG ==========\n")
-    print("\n========== RUNTIME PROMPT CHECK ==========")
-    print("New example rules loaded:", "EXAMPLE AND CALCULATION RULES:" in prompt)
-    print("No hypothetical example rule:", "Never create sample transactions" in prompt)
-    print("Prompt length:", len(prompt))
-    print("========== END PROMPT CHECK ==========\n")
-
     response = llm.invoke(prompt)
     return response.content
